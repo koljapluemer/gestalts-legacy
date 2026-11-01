@@ -1,0 +1,12 @@
+id: d4557c82-b778-55dc-a22f-e8c446270eba
+title: κῶνος
+lang: grc
+tags:
+- pronunciation-card
+- greek-alphabet
+blobs:
+- label: image
+  file: d4557c82-b778-55dc-a22f-e8c446270eba.webp
+- label: audio
+  file: d4557c82-b778-55dc-a22f-e8c446270eba.mp3
+source: sam-learns-things ancient-greek-alphabet; audio generated with espeak-ng

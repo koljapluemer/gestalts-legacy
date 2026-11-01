@@ -1,0 +1,12 @@
+id: e19bd75d-08db-53e7-8203-131ccbb3f16a
+title: τεχνολογία
+lang: grc
+tags:
+- pronunciation-card
+- greek-alphabet
+blobs:
+- label: image
+  file: e19bd75d-08db-53e7-8203-131ccbb3f16a.webp
+- label: audio
+  file: e19bd75d-08db-53e7-8203-131ccbb3f16a.mp3
+source: sam-learns-things ancient-greek-alphabet; audio generated with espeak-ng

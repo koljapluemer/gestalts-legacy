@@ -1,0 +1,11 @@
+[package]
+name = "gestalts-fs"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+gestalts-core.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+pollster = "0.4"

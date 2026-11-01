@@ -1,0 +1,12 @@
+id: 05226fdc-bc01-58fb-95d1-1b77d4642167
+title: θρόνος
+lang: grc
+tags:
+- pronunciation-card
+- greek-alphabet
+blobs:
+- label: image
+  file: 05226fdc-bc01-58fb-95d1-1b77d4642167.webp
+- label: audio
+  file: 05226fdc-bc01-58fb-95d1-1b77d4642167.mp3
+source: sam-learns-things ancient-greek-alphabet; audio generated with espeak-ng

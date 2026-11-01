@@ -1,0 +1,15 @@
+[package]
+name = "gestalts-connector"
+description = "Serves a gestalt data folder to browser apps on localhost"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+gestalts-core.workspace = true
+gestalts-fs.workspace = true
+serde.workspace = true
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+mime_guess = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tower-http = { version = "0.6", features = ["cors"] }

@@ -1,0 +1,12 @@
+id: 5a3ee55b-0f6b-54cf-aa18-8062074a33cd
+title: σκορπίος
+lang: grc
+tags:
+- pronunciation-card
+- greek-alphabet
+blobs:
+- label: image
+  file: 5a3ee55b-0f6b-54cf-aa18-8062074a33cd.webp
+- label: audio
+  file: 5a3ee55b-0f6b-54cf-aa18-8062074a33cd.mp3
+source: sam-learns-things ancient-greek-alphabet; audio generated with espeak-ng

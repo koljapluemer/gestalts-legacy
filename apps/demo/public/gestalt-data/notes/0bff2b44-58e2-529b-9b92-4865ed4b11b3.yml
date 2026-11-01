@@ -1,0 +1,12 @@
+id: 0bff2b44-58e2-529b-9b92-4865ed4b11b3
+title: πέπερι
+lang: grc
+tags:
+- pronunciation-card
+- greek-alphabet
+blobs:
+- label: image
+  file: 0bff2b44-58e2-529b-9b92-4865ed4b11b3.webp
+- label: audio
+  file: 0bff2b44-58e2-529b-9b92-4865ed4b11b3.mp3
+source: sam-learns-things ancient-greek-alphabet; audio generated with espeak-ng

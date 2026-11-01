@@ -1,0 +1,7 @@
+name: appointment
+version: 1
+description: Something happening on a date.
+requires_tags: [appointment]
+fields:
+  title: { type: string }
+  date: { type: date, required: true }
