@@ -56,5 +56,8 @@ Plugins could live in the data folder (`plugins/`), so they sync across devices.
 **Open questions:**
 - Change notifications: the connector has no watch/SSE endpoint, and 15 s sync is slow for progress updates.
 - Volume: `Repo` loads every note, so high-volume workers need retention or digest notes.
-- Python validating gestalts: `just lint-data` for now, maybe a pyo3 binding of the core later.
+- Python validating gestalts: `mise run lint-data` for now, maybe a pyo3 binding of the core later.
 - Where secrets live: with the worker, never in notes.
+- Publish the Python plugin SDK to PyPI. Built-in plugins depend on it by repo path, so the connector embeds `sdk/python` next to them; third-party plugins need a released version.
+- CI release builds of the connector on macOS and Windows runners (their tray/event-loop code is untested so far), plus code signing.
+- Safari blocks `https://` pages from calling `http://127.0.0.1`; supporting it needs TLS on localhost.

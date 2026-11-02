@@ -53,6 +53,8 @@ export type SyncReport = {
   conflicts: string[];
   blobs_pulled: string[];
   blobs_pushed: string[];
+  /** the connector's open folder */
+  folder: string;
 };
 
 /** What checking a layered repo against its upstream did, by note key. */

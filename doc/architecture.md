@@ -4,7 +4,7 @@
 crates/core        notes, gestalts, queries, 3-way merge; the Storage port. No IO.
 crates/fs          Storage adapter: a folder on disk
 crates/wasm        the core in the browser + adapters: OPFS, static site, connector (HTTP)
-crates/connector   gestalts-connector: serves a folder on localhost
+crates/connector   gestalts-connector: desktop app serving a folder on localhost, and the plugin host
 gestalts/          gestalt definitions (data, embedded into the core)
 packages/client    TS wrapper of the wasm core: Repo, React hooks, field helpers
 packages/ui        primitives → components → widgets → perspectives → panes

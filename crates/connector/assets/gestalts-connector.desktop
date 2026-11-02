@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Gestalts Connector
+Comment=Keeps your Gestalts notes in a folder on this computer and runs your plugins
+Exec=gestalts-connector
+Icon=gestalts-connector
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=false

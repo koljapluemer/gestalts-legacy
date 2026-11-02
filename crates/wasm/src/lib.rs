@@ -145,16 +145,25 @@ impl WasmRepo {
     }
 
     /// Syncs this repo's writable notes and blobs with a connector, then reloads. `tag` names conflict notes.
+    /// Returns the sync report plus `folder`, the path of the connector's open folder.
     pub async fn sync(&self, connector_url: String, tag: String) -> Result<JsValue, JsError> {
         let remote = Connector::new(&connector_url);
-        remote.health().await.map_err(err)?;
-        let slug: String = connector_url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        let health = remote.health().await.map_err(err)?;
+        let folder = &health["folder"];
+        let (Some(folder_id), Some(folder_path)) = (folder["id"].as_str(), folder["path"].as_str()) else {
+            return Err(JsError::new("The connector has no folder open yet. Choose one in the Gestalts Connector."));
+        };
+        // the base is per folder: the same connector URL may serve a different folder later, and
+        // comparing against another folder's base would read its missing notes as deletions
+        let slug: String = format!("{connector_url}#{folder_id}").chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let base = Opfs::open(&format!("{}-sync-base/{slug}", self.dir)).await.map_err(err)?;
         let report = gestalts_core::sync(&*self.writable, &remote, &base, &tag).await.map_err(err)?;
         self.pull_upstream().await?;
         let repo = self.repo.clone();
         repo.load().await.map_err(err)?;
-        to_js(&report)
+        let mut out = serde_json::to_value(&report).map_err(|e| JsError::new(&e.to_string()))?;
+        out["folder"] = folder_path.into();
+        to_js(&out)
     }
 }
 

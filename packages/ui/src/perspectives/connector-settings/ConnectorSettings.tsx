@@ -15,7 +15,7 @@ export const ConnectorSettings = definePerspective<Record<string, never>>({
     return (
       <div className="flex w-72 flex-col gap-2">
         <p className="text-sm text-base-content/70">
-          Sync with a data folder on this computer via <code>gestalts-connector</code>. Without it, everything stays in this browser.
+          Sync with a folder on this computer through the Gestalts Connector app. Without it, everything stays in this browser.
         </p>
         <input className="input input-sm w-full" value={url} onChange={(e) => setUrl(e.target.value)} disabled={!!status.url} aria-label="Connector URL" />
         {status.url ? (
@@ -30,6 +30,7 @@ export const ConnectorSettings = definePerspective<Record<string, never>>({
           {status.state === 'off' && 'Not connected.'}
           {status.state === 'syncing' && 'Syncing…'}
           {status.state === 'ok' && `Synced ${status.lastSync?.toLocaleTimeString() ?? ''}${status.lastReport ? ` · ${status.lastReport.pulled.length} in, ${status.lastReport.pushed.length} out` : ''}`}
+          {status.folder && status.state !== 'error' && <code className="block truncate" title={status.folder}>{status.folder}</code>}
           {status.state === 'error' && <span className="text-error">{status.error}</span>}
         </p>
         {status.conflicts.length > 0 && (

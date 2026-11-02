@@ -15,6 +15,8 @@ export type ConnectorStatus = {
   lastReport?: SyncReport;
   /** conflict notes created since connecting */
   conflicts: string[];
+  /** the folder the connector serves, as of the last sync */
+  folder?: string;
 };
 
 /** A versioned optional HTTP service exposed by a connector-hosted plugin. */
@@ -190,7 +192,7 @@ export class Repo {
       const tag = new Date().toISOString().replace(/[:.]/g, '-');
       const report = await this.serial(() => this.wasm.sync(url, tag) as Promise<SyncReport>);
       if (this.status.url !== url) return report;
-      this.setStatus({ state: 'ok', lastSync: new Date(), lastReport: report, conflicts: [...this.status.conflicts, ...report.conflicts] });
+      this.setStatus({ state: 'ok', lastSync: new Date(), lastReport: report, folder: report.folder, conflicts: [...this.status.conflicts, ...report.conflicts] });
       if (report.pulled.length || report.blobs_pulled.length) {
         report.blobs_pulled.forEach((b) => this.blobUrls.delete(b));
         this.changed();

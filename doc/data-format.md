@@ -42,7 +42,7 @@ A deck shipped read-only (like the Demo's `public/gestalt-data`) follows a few m
 
   A copy is untouched while the text before the trailer still has that hash.
 
-To publish after editing notes or overwriting blob files, run `just publish-data <folder>` and commit the result. It:
+To publish after editing notes or overwriting blob files, run `mise run publish-data <folder>` and commit the result. It:
 1. renames blobs to their content hash and rewrites the notes that use them
 2. deletes blobs no note uses
 3. writes `index.json`

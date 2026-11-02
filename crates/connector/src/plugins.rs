@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, RwLock};
 
-#[derive(Debug, Clone, Serialize)]
+use crate::paths::Paths;
+use crate::uv::{self, UvState};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginView {
     pub id: String,
@@ -22,7 +25,7 @@ pub struct PluginView {
     pub current_run: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginState { Stopped, Starting, Ready, Running, Error }
 
@@ -38,7 +41,8 @@ pub struct HostedPlugin {
 pub struct PluginHost {
     inner: Arc<RwLock<BTreeMap<String, Arc<Mutex<HostedPlugin>>>>>,
     connector_url: String,
-    cache_dir: PathBuf,
+    paths: Paths,
+    uv: Arc<std::sync::RwLock<UvState>>,
     client: reqwest::Client,
 }
 
@@ -54,10 +58,11 @@ enum TriggerRequest { Manual, Change }
 struct Health { protocol: u32 }
 
 impl PluginHost {
-    pub fn discover(dirs: &[PathBuf], connector_url: String, cache_dir: PathBuf) -> Result<Self, String> {
+    pub fn discover(dirs: &[PathBuf], connector_url: String, paths: Paths) -> Result<Self, String> {
         let mut found = BTreeMap::new();
         let mut services = BTreeSet::new();
         for dir in dirs {
+            if !dir.exists() { continue; }
             let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read plugin directory {}: {e}", dir.display()))?;
             for entry in entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())) {
                 if !entry.path().join("plugin.yml").is_file() { continue; }
@@ -72,13 +77,31 @@ impl PluginHost {
                 found.insert(id, Arc::new(Mutex::new(HostedPlugin { bundle, view, token: uuid::Uuid::new_v4().to_string(), worker_url: None, child: None })));
             }
         }
-        Ok(Self { inner: Arc::new(RwLock::new(found)), connector_url, cache_dir, client: reqwest::Client::new() })
+        Ok(Self { inner: Arc::new(RwLock::new(found)), connector_url, paths, uv: Arc::new(std::sync::RwLock::new(UvState::Locating)), client: reqwest::Client::new() })
     }
 
+    pub fn uv_state(&self) -> UvState { self.uv.read().expect("uv state lock").clone() }
+
+    fn set_uv(&self, state: UvState) { *self.uv.write().expect("uv state lock") = state; }
+
+    /// Finds (or downloads) uv, then starts every plugin's worker.
     pub async fn start_all(&self) {
         let plugins: Vec<_> = self.inner.read().await.values().cloned().collect();
+        if plugins.is_empty() { return; }
+        let uv = match uv::locate(&self.paths.data, || self.set_uv(UvState::Downloading)).await {
+            Ok((path, version)) => { self.set_uv(UvState::Ready { path: path.clone(), version }); path }
+            Err(error) => {
+                self.set_uv(UvState::Failed { error: error.clone() });
+                for plugin in plugins {
+                    let mut p = plugin.lock().await;
+                    p.view.state = PluginState::Error;
+                    p.view.error = Some(format!("uv unavailable: {error}"));
+                }
+                return;
+            }
+        };
         for plugin in plugins {
-            if let Err(e) = self.start(plugin.clone()).await {
+            if let Err(e) = self.start(plugin.clone(), &uv).await {
                 let mut p = plugin.lock().await;
                 p.view.state = PluginState::Error;
                 p.view.error = Some(e);
@@ -86,24 +109,41 @@ impl PluginHost {
         }
     }
 
-    async fn start(&self, plugin: Arc<Mutex<HostedPlugin>>) -> Result<(), String> {
+    /// Stops every worker (on quit; dropping the host alone doesn't, since the process may exit first).
+    pub async fn stop_all(&self) {
+        let plugins: Vec<_> = self.inner.read().await.values().cloned().collect();
+        for plugin in plugins {
+            let mut p = plugin.lock().await;
+            if let Some(mut child) = p.child.take() { let _ = child.kill().await; }
+            p.view.state = PluginState::Stopped;
+        }
+    }
+
+    async fn start(&self, plugin: Arc<Mutex<HostedPlugin>>, uv: &std::path::Path) -> Result<(), String> {
         let mut p = plugin.lock().await;
         p.view.state = PluginState::Starting;
         if p.bundle.manifest.worker.runtime != Runtime::Uv { return Err("unsupported runtime".into()); }
         let project = p.bundle.root.join(&p.bundle.manifest.worker.project);
-        let environment = self.cache_dir.join(&p.bundle.manifest.id).join("venv");
+        let environment = self.paths.cache.join("plugins").join(&p.bundle.manifest.id).join("venv");
         std::fs::create_dir_all(environment.parent().unwrap()).map_err(|e| e.to_string())?;
-        let sync = Command::new("uv").args(["sync", "--locked", "--project"]).arg(&project)
+        let sync = self.uv_command(uv).args(["sync", "--locked", "--project"]).arg(&project)
             .env("UV_PROJECT_ENVIRONMENT", &environment).stdout(Stdio::null()).stderr(Stdio::piped()).output().await.map_err(|e| format!("cannot run uv: {e}"))?;
         if !sync.status.success() { return Err(format!("uv sync failed: {}", String::from_utf8_lossy(&sync.stderr).trim())); }
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         drop(listener);
+        // run the synced environment's executables directly (not via `uv run`), so the process we
+        // stop is the worker itself rather than a uv parent whose child would outlive it
         let command = &p.bundle.manifest.worker.command;
-        let mut cmd = Command::new("uv");
-        cmd.args(["run", "--locked", "--project"]).arg(&project).arg("--").arg(&command[0]).args(&command[1..])
+        let bin = environment.join(if cfg!(windows) { "Scripts" } else { "bin" });
+        let program = [bin.join(&command[0]), bin.join(format!("{}.exe", command[0]))].into_iter().find(|p| p.is_file())
+            .unwrap_or_else(|| PathBuf::from(&command[0]));
+        let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::var_os("PATH").iter().flat_map(std::env::split_paths)))
+            .map_err(|e| e.to_string())?;
+        let mut cmd = Command::new(program);
+        cmd.args(&command[1..])
             .current_dir(&project)
-            .env("UV_PROJECT_ENVIRONMENT", &environment)
+            .env("VIRTUAL_ENV", &environment).env("PATH", path).stdin(Stdio::null())
             .env("GESTALTS_CONNECTOR_URL", &self.connector_url).env("GESTALTS_PLUGIN_TOKEN", &p.token)
             .env("GESTALTS_PLUGIN_ID", &p.bundle.manifest.id).env("GESTALTS_WORKER_PORT", port.to_string())
             .stdout(Stdio::inherit()).stderr(Stdio::inherit()).kill_on_drop(true);
@@ -119,6 +159,14 @@ impl PluginHost {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Err("worker readiness timed out".into())
+    }
+
+    /// uv with its Python installs and download cache kept inside the app's own folders.
+    fn uv_command(&self, uv: &std::path::Path) -> Command {
+        let mut cmd = Command::new(uv);
+        cmd.env("UV_PYTHON_INSTALL_DIR", self.paths.data.join("python")).env("UV_CACHE_DIR", self.paths.cache.join("uv"))
+            .stdin(Stdio::null());
+        cmd
     }
 
     pub async fn views(&self) -> Vec<PluginView> {
@@ -199,6 +247,48 @@ fn query_matches(query: &Query, note: &Note, gestalts: &[String]) -> bool {
         && query.where_.iter().all(|(field, value)| note.get(field) == Some(value))
 }
 
-pub fn default_cache_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("gestalts-cache")).join("gestalts/plugins")
+/// The plugins shipped in the repo's `plugins/`, compiled into the binary so an installed connector needs no checkout.
+static BUILTIN: include_dir::Dir<'static> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../plugins");
+/// The Python SDK they depend on by relative path (`../../../sdk/python`), so it is unpacked in the same layout.
+// TODO: publish the SDK to PyPI and depend on a version instead, which third-party plugins need anyway
+static SDK: include_dir::Dir<'static> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../sdk/python");
+
+/// Unpacks the built-in plugins and the SDK under `data/builtin-plugins/<content hash>/` (once per
+/// build), mirroring the repo layout, and returns the plugins folder in there.
+pub fn unpack_builtin(paths: &Paths) -> std::io::Result<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let mut files = Vec::new();
+    collect(&BUILTIN, Path::new("plugins"), &mut files);
+    collect(&SDK, Path::new("sdk/python"), &mut files);
+    let mut hash = Sha256::new();
+    for (path, f) in &files { hash.update(path.to_string_lossy().as_bytes()); hash.update([0]); hash.update(f.contents()); }
+    let id: String = hash.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect();
+    let root = paths.data.join("builtin-plugins");
+    let dest = root.join(&id);
+    if !dest.is_dir() {
+        let tmp = root.join(format!("{id}.part"));
+        let _ = std::fs::remove_dir_all(&tmp);
+        for (path, f) in &files {
+            let path = tmp.join(path);
+            std::fs::create_dir_all(path.parent().expect("file is in a folder"))?;
+            std::fs::write(path, f.contents())?;
+        }
+        std::fs::rename(&tmp, &dest)?;
+    }
+    // older builds' copies
+    for entry in std::fs::read_dir(&root)?.flatten() {
+        if entry.file_name() != id.as_str() { let _ = std::fs::remove_dir_all(entry.path()); }
+    }
+    Ok(dest.join("plugins"))
+}
+
+/// Files under `dir`, with their paths below `prefix`; skips Python caches and environments.
+fn collect<'a>(dir: &'a include_dir::Dir<'a>, prefix: &Path, out: &mut Vec<(PathBuf, &'a include_dir::File<'a>)>) {
+    for entry in dir.entries() {
+        match entry {
+            include_dir::DirEntry::Dir(d) if d.path().file_name().is_some_and(|n| n == "__pycache__" || n == ".venv") => {}
+            include_dir::DirEntry::Dir(d) => collect(d, prefix, out),
+            include_dir::DirEntry::File(f) => out.push((prefix.join(f.path()), f)),
+        }
+    }
 }

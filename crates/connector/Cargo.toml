@@ -1,8 +1,13 @@
 [package]
 name = "gestalts-connector"
-description = "Serves a gestalt data folder to browser apps on localhost"
+description = "Makes a folder on this computer the source of truth for the Gestalts web apps"
 edition.workspace = true
 version.workspace = true
+
+[features]
+default = ["desktop"]
+# tray icon, status window and native folder dialog; without it the binary is headless (`serve`, `lint`, `publish`)
+desktop = ["dep:tray-icon", "dep:tao", "dep:eframe", "dep:rfd", "dep:auto-launch", "dep:opener"]
 
 [dependencies]
 gestalts-core.workspace = true
@@ -10,10 +15,61 @@ gestalts-fs.workspace = true
 gestalts-plugin-host = { path = "../plugin-host" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
+directories = "6"
+flate2 = "1"
+include_dir = "0.7"
 mime_guess = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "blocking"] }
+tar = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "time", "sync"] }
 tower-http = { version = "0.6", features = ["cors"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
-uuid.workspace = true
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+eframe = { version = "0.37", optional = true, default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "links", "accesskit"] }
+rfd = { version = "0.17", optional = true, default-features = false, features = ["xdg-portal"] }
+auto-launch = { version = "0.6", optional = true }
+opener = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+# Linux: StatusNotifierItem over D-Bus, so no GTK/appindicator; it runs its own thread, no event loop needed
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-icon = { version = "0.26", optional = true, default-features = false, features = ["ksni"] }
+
+# macOS/Windows: the tray needs an event loop on the main thread, which tao provides
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { version = "0.26", optional = true }
+tao = { version = "0.37", optional = true }
+
+[package.metadata.packager]
+product-name = "Gestalts Connector"
+identifier = "com.koljasam.gestalts.connector"
+category = "Productivity"
+description = "Keeps your Gestalts notes in a folder on this computer and runs your plugins"
+icons = ["assets/icon.png"]
+authors = ["Kolja Sam"]
+publisher = "Kolja Sam"
+before-packaging-command = "cargo build --release -p gestalts-connector"
+out-dir = "../../target/packages"
+
+[package.metadata.packager.deb]
+depends = ["libxkbcommon0", "libegl1"]
+
+[package.metadata.generate-rpm]
+name = "gestalts-connector"
+summary = "Keeps your Gestalts notes in a folder on this computer and runs your plugins"
+license = "proprietary"
+assets = [
+  { source = "../../target/release/gestalts-connector", dest = "/usr/bin/gestalts-connector", mode = "755" },
+  { source = "assets/gestalts-connector.desktop", dest = "/usr/share/applications/gestalts-connector.desktop", mode = "644" },
+  { source = "assets/icon.png", dest = "/usr/share/icons/hicolor/256x256/apps/gestalts-connector.png", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+libxkbcommon = "*"
+mesa-libEGL = "*"

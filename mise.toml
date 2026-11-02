@@ -1,0 +1,74 @@
+# Developer tools and tasks. After cloning: `mise install`, then `mise run dev`.
+# Rust itself is pinned in rust-toolchain.toml (rustup reads it).
+
+[tools]
+node = "26.12.0"
+pnpm = "10.32.1"
+uv = "0.13.6"
+"cargo:wasm-pack" = "0.15.1"
+"cargo:cargo-packager" = "0.11.8"
+"cargo:cargo-generate-rpm" = "0.21.1"
+
+[tasks.setup]
+description = "JS dependencies and the core compiled to wasm (after cloning, and after changing crates/core or crates/wasm)"
+run = [
+  "pnpm install",
+  "wasm-pack --log-level warn build crates/wasm --target web --out-dir ../../packages/client/wasm --out-name gestalts",
+]
+
+[tasks.dev]
+description = "Everything from the repo with hot reload: connector (tray, repo plugins, dev profile), Gestalter :5173, Demo :5174"
+depends = ["setup"]
+shell = "bash -c"
+run = """
+trap 'kill 0' EXIT
+cargo run -q -p gestalts-connector -- --profile dev --plugins-dir plugins &
+pnpm --dir apps/gestalter dev &
+pnpm --dir apps/demo dev &
+wait
+"""
+
+[tasks.check]
+description = "Tests, lints and typechecks"
+depends = ["setup"]
+run = [
+  "cargo test --workspace -q",
+  "cargo clippy --workspace -q -- -D warnings",
+  "cargo clippy -p gestalts-connector --no-default-features -q -- -D warnings",
+  "pnpm lint",
+  "pnpm typecheck",
+  "pnpm test",
+]
+
+[tasks.build]
+description = "Production builds of the web frontends into apps/*/dist, for deploying"
+depends = ["setup"]
+run = 'pnpm -r --filter "./apps/*" build'
+
+[tasks.package]
+description = "Connector installers for this OS into target/packages"
+shell = "bash -c"
+run = """
+set -euo pipefail
+case "$(uname -s)" in
+  Linux)  cargo packager -p gestalts-connector --release --formats deb,appimage
+          cargo generate-rpm -p crates/connector -o target/packages ;;
+  Darwin) cargo packager -p gestalts-connector --release --formats dmg ;;
+  *)      cargo packager -p gestalts-connector --release --formats nsis ;;
+esac
+"""
+
+[tasks.install]
+description = "Build and install the connector on this machine, the way a user gets it"
+depends = ["package"]
+run = "bash scripts/install-package.sh target/packages"
+
+[tasks.lint-data]
+description = "Print each note's gestalts and lints for a data folder"
+usage = 'arg "<dir>" help="the data folder (notes/ + blobs/)"'
+run = "cargo run -q --release -p gestalts-connector --no-default-features -- lint {{usage.dir}}"
+
+[tasks.publish-data]
+description = "Prepare a data folder for publishing as a read-only deck: content-addressed blobs, index.json, lints"
+usage = 'arg "<dir>" help="the data folder (notes/ + blobs/)"'
+run = "cargo run -q --release -p gestalts-connector --no-default-features -- publish {{usage.dir}}"
