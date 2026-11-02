@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use gestalts_core::storage::{Result, Storage, StorageError, check_key, note_key_from_file};
 
+mod publish;
+pub use publish::{PublishReport, blob_name, publish};
+
 #[derive(Debug, Clone)]
 pub struct FsStorage {
     root: PathBuf,

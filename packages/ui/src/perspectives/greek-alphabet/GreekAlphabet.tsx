@@ -20,7 +20,7 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
   id: 'greek-alphabet',
   title: 'Greek alphabet',
   data: ({ deckTag = 'greek-alphabet' }) => ({
-    cards: { gestalt: 'pronunciation-card@1', tagsAll: [deckTag] },
+    cards: { gestalt: 'pronunciation-card@1', tagsAll: [deckTag], tagsNone: ['retired'] },
     reviews: { gestalt: 'fsrs-state@1' },
   }),
   Component: ({ data, repo }) => {

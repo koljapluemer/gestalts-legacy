@@ -52,9 +52,12 @@ pub fn note_key_from_file(file: &str) -> Option<&str> {
 
 /// Reads from `top`, falling back to `base`; writes go to `top` only.
 /// Used for read-only shipped content (`base`) plus the user's own notes (`top`).
+/// Copy-on-write: a note written to `top` pulls the `base` notes it references into `top`
+/// (see [`crate::upstream`]), tagged with `source`.
 pub struct Layered<B, T> {
     pub base: B,
     pub top: T,
+    pub source: String,
 }
 
 #[async_trait(?Send)]
@@ -69,7 +72,9 @@ impl<B: Storage, T: Storage> Storage for Layered<B, T> {
         }
     }
     async fn write_note(&self, key: &str, text: &str) -> Result<()> {
-        self.top.write_note(key, text).await
+        self.top.write_note(key, text).await?;
+        crate::upstream::copy_up_refs(&self.base, &self.top, &self.source, key, text).await?;
+        Ok(())
     }
     async fn delete_note(&self, key: &str) -> Result<()> {
         if self.top.read_note(key).await?.is_none() && self.base.read_note(key).await?.is_some() {
@@ -161,3 +166,24 @@ macro_rules! forward_storage {
 }
 forward_storage!(Box<S>);
 forward_storage!(std::rc::Rc<S>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layered_copies_referenced_base_notes_on_write() {
+        pollster::block_on(async {
+            let base = Memory::default();
+            base.write_note("c", "title: x\nblobs: [a.mp3]\n").await.unwrap();
+            base.write_note("unused", "title: y\n").await.unwrap();
+            base.write_blob("a.mp3", &[1]).await.unwrap();
+            let l = Layered { base, top: Memory::default(), source: "demo".into() };
+            l.write_note("s", "relationships: [{to: c, label: reviews}]\n").await.unwrap();
+            assert_eq!(l.top.list_notes().await.unwrap(), vec!["c", "s"]);
+            assert_eq!(l.top.list_blobs().await.unwrap(), vec!["a.mp3"]);
+            assert!(l.read_note("c").await.unwrap().unwrap().contains("source: demo"));
+            assert_eq!(l.list_notes().await.unwrap().len(), 3);
+        });
+    }
+}

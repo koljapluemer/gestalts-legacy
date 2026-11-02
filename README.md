@@ -10,5 +10,6 @@ just setup            # once
 just gestalter        # http://localhost:5173
 just demo             # http://localhost:5174
 just connector ~/my-gestalt-data   # optional: a folder on disk as source of truth
+just publish-data apps/demo/public/gestalt-data   # after editing the shipped deck
 just check
 ```

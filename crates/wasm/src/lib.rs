@@ -3,10 +3,11 @@
 mod http;
 mod opfs;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gestalts_core::storage::{Layered, Storage, StorageError};
-use gestalts_core::{Gestalts, IndexedNote, Note, Query, Repo};
+use gestalts_core::{Gestalts, IndexedNote, Note, Query, Repo, UpstreamReport, pull_upstream};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -31,6 +32,9 @@ pub struct WasmRepo {
     writable: Dyn,
     /// OPFS folder name, used to keep sync base snapshots next to the data
     dir: String,
+    /// the read-only upstream of a layered repo; its copies are tagged with `dir` as source
+    upstream: Option<Dyn>,
+    upstream_report: RefCell<UpstreamReport>,
 }
 
 #[wasm_bindgen]
@@ -38,21 +42,38 @@ impl WasmRepo {
     /// Notes in OPFS under `dir`.
     pub async fn opfs(dir: String) -> Result<WasmRepo, JsError> {
         let writable: Dyn = Rc::new(Opfs::open(&dir).await.map_err(err)?);
-        Self::build(writable.clone(), writable, dir).await
+        Self::build(writable.clone(), writable, dir, None).await
     }
 
     /// Read-only notes published at `static_base` (see `Static`), overlaid with writable notes in OPFS under `dir`.
+    /// Copy-on-write: upstream notes the user's notes reference are copied into OPFS, and untouched
+    /// copies follow upstream changes (see `gestalts_core::upstream`).
     pub async fn layered(static_base: String, dir: String) -> Result<WasmRepo, JsError> {
-        let base = Static::open(&static_base).await.map_err(err)?;
+        let base: Dyn = Rc::new(Static::open(&static_base).await.map_err(err)?);
         let writable: Dyn = Rc::new(Opfs::open(&dir).await.map_err(err)?);
-        let storage: Dyn = Rc::new(Layered { base, top: writable.clone() });
-        Self::build(storage, writable, dir).await
+        let storage: Dyn = Rc::new(Layered { base: base.clone(), top: writable.clone(), source: dir.clone() });
+        Self::build(storage, writable, dir, Some(base)).await
     }
 
-    async fn build(storage: Dyn, writable: Dyn, dir: String) -> Result<WasmRepo, JsError> {
+    async fn build(storage: Dyn, writable: Dyn, dir: String, upstream: Option<Dyn>) -> Result<WasmRepo, JsError> {
         let repo = Rc::new(Repo::new(storage, Gestalts::builtin()));
-        repo.load().await.map_err(err)?;
-        Ok(WasmRepo { repo, writable, dir })
+        let this = WasmRepo { repo, writable, dir, upstream, upstream_report: RefCell::default() };
+        this.pull_upstream().await?;
+        this.repo.load().await.map_err(err)?;
+        Ok(this)
+    }
+
+    async fn pull_upstream(&self) -> Result<(), JsError> {
+        if let Some(base) = &self.upstream {
+            *self.upstream_report.borrow_mut() = pull_upstream(&**base, &*self.writable, &self.dir).await.map_err(err)?;
+        }
+        Ok(())
+    }
+
+    /// What the last check against upstream did: `{copied, updated, diverged}`, all empty for a plain OPFS repo.
+    #[wasm_bindgen(js_name = upstreamReport)]
+    pub fn upstream_report(&self) -> Result<JsValue, JsError> {
+        to_js(&*self.upstream_report.borrow())
     }
 
     /// Rereads everything from storage.
@@ -130,6 +151,7 @@ impl WasmRepo {
         let slug: String = connector_url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let base = Opfs::open(&format!("{}-sync-base/{slug}", self.dir)).await.map_err(err)?;
         let report = gestalts_core::sync(&*self.writable, &remote, &base, &tag).await.map_err(err)?;
+        self.pull_upstream().await?;
         let repo = self.repo.clone();
         repo.load().await.map_err(err)?;
         to_js(&report)

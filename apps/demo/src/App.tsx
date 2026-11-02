@@ -1,13 +1,21 @@
+import { useEffect } from 'react';
 import { Settings } from 'lucide-react';
 import { RepoProvider, useOpenRepo } from '@gestalts/client';
 import { GreekAlphabetPane } from '@gestalts/ui/panes';
 import { ConnectorSettings } from '@gestalts/ui/perspectives';
 
-/** Shipped words come from public/gestalt-data; the learner's progress stays in this browser (OPFS). */
+/**
+ * Shipped words come from public/gestalt-data. A word is copied into this browser (OPFS) with the
+ * learner's progress once it is first rated, so the learner's data stands on its own.
+ */
 const SOURCE = { kind: 'layered', staticBase: new URL('gestalt-data', document.baseURI).href, dir: 'demo' } as const;
 
 export function App() {
   const { repo, error } = useOpenRepo(SOURCE);
+  useEffect(() => {
+    const r = repo?.upstreamReport();
+    if (r && (r.copied.length || r.updated.length || r.diverged.length)) console.info('deck update', r);
+  }, [repo]);
   return (
     <div className="flex min-h-dvh flex-col bg-base-200">
       <header className="navbar min-h-0 bg-base-100 px-4 py-1 shadow-sm">

@@ -32,6 +32,10 @@ struct Args {
     /// instead of serving, print each note's gestalts and lints, and exit non-zero on lints
     #[arg(long)]
     lint: bool,
+    /// instead of serving, prepare the folder as a published deck (content-addressed blobs,
+    /// unreferenced ones deleted, index.json), then lint; exits non-zero on problems
+    #[arg(long)]
+    publish: bool,
 }
 
 type Store = Arc<FsStorage>;
@@ -170,6 +174,15 @@ fn lint(store: &FsStorage) -> usize {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    if args.publish {
+        let r = gestalts_fs::publish(&args.data).expect("can publish the folder");
+        r.renamed.iter().for_each(|(a, b)| println!("renamed {a} -> {b}"));
+        r.removed.iter().for_each(|b| println!("removed unreferenced {b}"));
+        r.problems.iter().for_each(|p| println!("! {p}"));
+        let n = r.problems.len() + lint(&FsStorage::new(&args.data));
+        eprintln!("{n} problem(s)");
+        std::process::exit(i32::from(n > 0));
+    }
     if args.lint {
         let n = lint(&FsStorage::new(&args.data));
         eprintln!("{n} problem(s)");

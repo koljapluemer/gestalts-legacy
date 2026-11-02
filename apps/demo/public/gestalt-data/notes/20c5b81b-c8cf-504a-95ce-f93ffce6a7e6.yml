@@ -6,7 +6,7 @@ tags:
 - greek-alphabet
 blobs:
 - label: image
-  file: 20c5b81b-c8cf-504a-95ce-f93ffce6a7e6.webp
+  file: abe03ec1c9ece0e8.webp
 - label: audio
-  file: 20c5b81b-c8cf-504a-95ce-f93ffce6a7e6.mp3
+  file: cdafded9fc6cc673.mp3
 source: sam-learns-things ancient-greek-alphabet; audio generated with espeak-ng

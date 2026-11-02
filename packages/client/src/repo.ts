@@ -1,10 +1,10 @@
 import init, { WasmRepo, newId as wasmNewId } from '../wasm/gestalts.js';
-import type { GestaltDef, IndexedNote, Json, Query, SyncReport } from './types';
+import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
 
 export type RepoSource =
   /** notes live in OPFS under `dir` */
   | { kind: 'opfs'; dir: string }
-  /** read-only notes published at `staticBase` (a URL), with the user's own in OPFS under `dir` */
+  /** read-only notes published at `staticBase` (a URL), copied into OPFS under `dir` once the user's notes reference them */
   | { kind: 'layered'; staticBase: string; dir: string };
 
 export type ConnectorStatus = {
@@ -74,6 +74,11 @@ export class Repo {
   /** The key of the note with this `id` (or key). */
   keyOf(id: string): string | undefined {
     return this.wasm.keyOf(id);
+  }
+
+  /** For a layered repo: what the last check against upstream (on open, after each sync) did. */
+  upstreamReport(): UpstreamReport {
+    return this.wasm.upstreamReport() as UpstreamReport;
   }
 
   gestalts(): GestaltDef[] {

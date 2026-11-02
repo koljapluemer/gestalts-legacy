@@ -24,6 +24,10 @@ connector DATA:
 lint-data DATA:
     cargo run --release -q -p gestalts-connector -- --data {{DATA}} --lint
 
+# prepare a data folder for publishing as a read-only deck: content-addressed blobs, index.json, lints
+publish-data DATA:
+    cargo run --release -q -p gestalts-connector -- --data {{DATA}} --publish
+
 # test, lint (incl. layer rules) and typecheck everything
 check: wasm
     cargo test --workspace -q

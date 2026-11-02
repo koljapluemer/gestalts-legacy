@@ -32,5 +32,5 @@ Each side is compared with a **base**: the state after the last sync, stored in 
 On a conflict the remote text is saved as the note `<key>.conflict-<timestamp>` on both sides, and the connector settings list it. Blobs are only ever copied to the side that lacks them. They are never merged or deleted.
 
 Caveats:
-- The Demo pulls every note and blob in the folder into its OPFS layer, including copies of the shipped words.
+- The Demo pulls every note and blob in the folder into its OPFS layer. Of the shipped words, only those the learner rated (and their blobs) are in that layer, so only those reach the folder.
 - A Demo hosted on a public origin that calls `localhost` runs into Chrome's Private Network Access rules. The connector does answer the preflight, but the prototype is only tested on local origins.

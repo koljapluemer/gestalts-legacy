@@ -53,4 +53,14 @@ export type SyncReport = {
   blobs_pushed: string[];
 };
 
+/** What checking a layered repo against its upstream did, by note key. */
+export type UpstreamReport = {
+  /** copied into user space because something there referenced them */
+  copied: string[];
+  /** untouched copies fast-forwarded to a changed upstream */
+  updated: string[];
+  /** edited copies whose upstream changed; left as they are */
+  diverged: string[];
+};
+
 export type Ref = { target: string; label: string | null };
