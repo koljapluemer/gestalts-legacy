@@ -18,7 +18,7 @@ demo: wasm
 
 # serve a data folder (notes/ + blobs/) to the apps on :7717
 connector DATA:
-    cargo run --release -q -p gestalts-connector -- --data {{DATA}}
+    cargo run --release -q -p gestalts-connector -- --data {{DATA}} --plugins-dir {{dir}}/plugins
 
 # print each note's gestalts and lints for a data folder
 lint-data DATA:

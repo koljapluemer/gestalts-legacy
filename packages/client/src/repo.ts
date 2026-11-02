@@ -17,6 +17,16 @@ export type ConnectorStatus = {
   conflicts: string[];
 };
 
+/** A versioned optional HTTP service exposed by a connector-hosted plugin. */
+export class ServiceClient {
+  constructor(readonly baseUrl: string, readonly id: string) {}
+
+  request(path = '', init?: RequestInit): Promise<Response> {
+    const suffix = path.replace(/^\//, '');
+    return fetch(`${this.baseUrl}/services/${encodeURIComponent(this.id)}/${suffix}`, init);
+  }
+}
+
 let ready: Promise<unknown> | null = null;
 
 /**
@@ -83,6 +93,11 @@ export class Repo {
 
   gestalts(): GestaltDef[] {
     return this.wasm.gestalts() as GestaltDef[];
+  }
+
+  /** Returns undefined while offline. A declared service may still answer 503 while its worker starts. */
+  service(id: string): ServiceClient | undefined {
+    return this.status.url ? new ServiceClient(this.status.url.replace(/\/$/, ''), id) : undefined;
   }
 
   /** What `raw` would index as, without saving it. */

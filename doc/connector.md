@@ -5,6 +5,11 @@ just connector ~/my-gestalt-data          # or: gestalts-connector --data DIR [-
 just lint-data ~/my-gestalt-data          # gestalts and lints per note
 ```
 
+The connector also hosts trusted repository plugins from `--plugins-dir` (the `just connector`
+recipe points it at `plugins/`). Workers run in locked `uv` environments and receive scoped,
+process-lifetime credentials. `GET /plugins` reports worker health, `POST /plugins/{id}/runs`
+starts a manual run, `GET /services` discovers services, and `/services/{id}/…` proxies them.
+
 The connector listens on `127.0.0.1` only. CORS is limited to `http(s)://localhost:*`, `127.0.0.1:*`, and any `--allow-origin`. There is no authentication: anything that runs on this machine with an allowed origin can read and write the folder.
 
 | endpoint | |

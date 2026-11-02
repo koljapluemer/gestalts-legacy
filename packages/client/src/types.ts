@@ -32,6 +32,8 @@ export type Query = {
   tagsAll?: string[];
   tagsNone?: string[];
   keys?: string[];
+  /** Exact matches on top-level scalar fields. */
+  where?: Record<string, string | number | boolean | null>;
 };
 
 export type GestaltDef = {

@@ -7,9 +7,13 @@ version.workspace = true
 [dependencies]
 gestalts-core.workspace = true
 gestalts-fs.workspace = true
+gestalts-plugin-host = { path = "../plugin-host" }
 serde.workspace = true
+serde_json.workspace = true
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 mime_guess = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "time", "sync"] }
 tower-http = { version = "0.6", features = ["cors"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+uuid.workspace = true

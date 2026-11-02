@@ -19,6 +19,9 @@ pub struct Query {
     pub tags_all: Vec<String>,
     pub tags_none: Vec<String>,
     pub keys: Option<Vec<String>>,
+    /// Exact matches on top-level scalar fields.
+    #[serde(rename = "where")]
+    pub where_: BTreeMap<String, Value>,
 }
 
 /// A note together with what the core knows about it, as handed to frontends.
@@ -88,6 +91,7 @@ impl<S: Storage> Repo<S> {
             .filter(|n| q.tags_all.iter().all(|t| n.note.has_tag(t)))
             .filter(|n| !q.tags_none.iter().any(|t| n.note.has_tag(t)))
             .filter(|n| q.keys.as_ref().is_none_or(|ks| ks.contains(&n.note.key)))
+            .filter(|n| q.where_.iter().all(|(k, v)| n.note.get(k) == Some(v)))
             .cloned()
             .collect()
     }
