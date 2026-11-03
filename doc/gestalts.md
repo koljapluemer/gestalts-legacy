@@ -71,7 +71,7 @@ Field options:
 | `practice-session@1` | tag `practice-session`, `app` (perspective id), `started`, optional `ended` (datetimes), `active_ms`, `trials`, `events` (each with `at`); random key, one writer |
 | `settings@1` | tag `settings`, `scope` (perspective id), further fields as the scope defines; keyed `stableId("settings", scope)` |
 
-Relationship labels with a meaning: `card-of` (a flashcard extracted from a note, the old form of `cards`), `canvas-of`
+Relationship labels with a meaning: `inline` (a `[[reference]]` in the note's text, kept in step with it), `card-of` (a flashcard extracted from a note, the old form of `cards`), `canvas-of`
 (the old form of a note's canvas) and `on-canvas` (each note on a canvas), `document-of` and `cites` (a Typst document or quote, its note and the sources it cites),
 `template-of`, `reviews` (learner state and the note it's for), `segment-of` (a sentence and the recording it's spoken
 in), `distractor` (a country easily confused with this one), `member` (a group and its notes), `actor` and `target`

@@ -18,3 +18,7 @@
 .md table { border-collapse: collapse; }
 .md th, .md td { border: 1px solid var(--color-base-300); padding: 0.2em 0.5em; }
 .md math[display="block"] { margin: 0.5em 0; }
+.md .md-embed { display: block; max-width: 100%; max-height: 60vh; }
+.md audio { max-width: 100%; }
+/* in a card: sized as a card's picture */
+.md-card .md .md-embed { max-height: min(320px, 40vh); margin-inline: auto; }

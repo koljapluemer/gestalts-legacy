@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { LoaderCircle, Plus } from 'lucide-react';
 import { newId, type Json } from '@gestalts/client';
 import { GestaltBadges } from '../../components';
+import { MarkdownEditor } from '../../primitives';
+import { useReferenceTools, withInline } from '../../widgets';
 import { definePerspective } from '../define/definePerspective';
 
 type Props = {
@@ -30,9 +32,11 @@ export const NewNote = definePerspective<Record<string, never>, Props>({
     const [main, setMain] = useState('');
     const [state, setState] = useState<{ saving: boolean; error?: string }>({ saving: false });
     const gestalts = useMemo(() => repo.gestalts().sort((a, b) => a.name.localeCompare(b.name)), [repo]);
+    const refs = useReferenceTools();
 
     const tags = splitTags(tagText);
-    const value: Record<string, Json> = { id, ...(title.trim() ? { title: title.trim() } : {}), tags, ...(main.trim() ? { main } : {}) };
+    // a `[[reference]]` in the text is also an `inline` relationship
+    const value: Record<string, Json> = withInline({ id, ...(title.trim() ? { title: title.trim() } : {}), tags, ...(main.trim() ? { main } : {}) });
     // YAML reads JSON, so the core can check the note before it exists
     const live = repo.inspect(id, JSON.stringify(value));
 
@@ -58,7 +62,12 @@ export const NewNote = definePerspective<Record<string, never>, Props>({
       <form
         className="flex flex-col gap-3 p-4"
         onSubmit={(e) => { e.preventDefault(); void create(); }}
-        onKeyDown={(e) => { if (e.key === 'Escape' && onCancel) { e.preventDefault(); e.stopPropagation(); onCancel(); } }}
+        onKeyDown={(e) => {
+          // Esc that closed the text's completion was handled already
+          if (e.defaultPrevented) return;
+          if (e.key === 'Escape' && onCancel) { e.preventDefault(); e.stopPropagation(); onCancel(); }
+          else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void create(); }
+        }}
       >
         <h2 className="text-lg font-semibold">New note</h2>
         <label className="floating-label">
@@ -81,13 +90,8 @@ export const NewNote = definePerspective<Record<string, never>, Props>({
             </select>
           </label>
         </div>
-        <textarea
-          className="textarea min-h-32 w-full"
-          placeholder="Text (Markdown)"
-          value={main}
-          onChange={(e) => setMain(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void create(); } }}
-        />
+        <MarkdownEditor value={main} onChange={setMain} onSave={() => void create()} search={refs.search} labelOf={refs.labelOf}
+                        placeholder="Text (Markdown; [[ links a note)" minHeight="8rem" />
         <GestaltBadges gestalts={live.gestalts} lints={live.lints} />
         {live.lints.length > 0 && (
           <ul className="text-xs text-base-content/60">

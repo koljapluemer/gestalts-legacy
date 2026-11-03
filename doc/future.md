@@ -41,7 +41,7 @@ Foundations:
 - [x] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
 - [x] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
 - [x] Shared learning layer: FSRS by facet, `practice-session` writer (trials, active time)
-- [ ] Note parity with dsl: rendered `main`/`extra` with `[[links]]`, embeds, math and cards; backlinks widget;
+- [x] Note parity with dsl: rendered `main`/`extra` with `[[links]]`, embeds, math and cards; backlinks widget;
   media attach and camera; `[[` completion
 
 dsl:
@@ -79,7 +79,6 @@ sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate t
 - Modification times in the `Storage` port, which the search would need for a "recent" list.
 - Authentication for the connector (a token per app).
 - A Learn pane for flashcards, `flashcard@1` notes and `cards` on notes (the ones migrated from dsl have no review state yet; `fsrs-state@1` is ready for it).
-- Rendering `main` as Markdown in the Explorer, with `[[id]]` links and `![[blob]]` embeds (the canvas does already).
 - Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).
 - Undo for more than the last canvas removal; text ↔ note conversions are not undoable yet.
 - Learner activity and time statistics. `practice-session@1` notes record trials and active time now, but no page shows them yet (sam-learns' own statistics weren't migrated).

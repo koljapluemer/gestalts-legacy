@@ -18,8 +18,8 @@ A note is any YAML. Conventions, all optional:
 | `tasks` | a note about the note, e.g. what's left to do with it |
 | `aliases` | other names, list of strings |
 | `tags` | contexts the note is (not) used in; letters, digits, dashes |
-| `relationships` | list of `<uuid>` or `{to: <uuid>, label: <label>}` |
-| `blobs` | list of `<file>` or `{file: <file>, label: <label>}` |
+| `relationships` | list of `<uuid>` or `{to: <uuid>, label: <label>}`; label `inline` for each `[[uuid]]` in `main`, `extra` or a card, kept in step by the app |
+| `blobs` | list of `<file>` or `{file: <file>, label: <label>}`; images and videos attached to the note are labelled `image` / `video`; every `![[file]]` embedded in the text is listed |
 | `upstream` | where a copied note came from, see [Published decks](#published-decks) |
 | `canvas`, `template`, `cards` | the note's own canvas, template and flashcards ([gestalts.md](gestalts.md#folded-parts)) |
 | `folded` | on a retired note whose content moved into another note: `{into, hash}` ([gestalts.md](gestalts.md#folded-parts)) |

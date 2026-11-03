@@ -3,6 +3,7 @@ export { bib, type Source, type FieldKind, type SourceMatch, type SourceMerge } 
 export { RepoProvider, useRepo, useRepoVersion, useQuery, useData, useNote, useBlobUrl, useConnector, useOpenRepo } from './react';
 export * from './fields';
 export * as fold from './fold';
+export { INLINE, inlineOutOfSync, inlineRefs, inlineTexts, syncInline, type RefsOf } from './inline';
 export type { Card, Template, Part, Hashing, FoldWrites } from './fold';
 export { MODEL as FSRS_MODEL, Rating, fsrsStates, fsrsStateValue, getScheduler, review, stateFromNote, type Facet, type FsrsStates, type Grade, type ReviewState, type Scheduler } from './learning';
 export { IDLE_MS, SESSION_GAP_MS, PracticeSession, type SessionEvent } from './session';

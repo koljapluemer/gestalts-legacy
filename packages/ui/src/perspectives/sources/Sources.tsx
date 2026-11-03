@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ClipboardPaste, Copy, Download, FileCode2, Plus, Search, Upload } from 'lucide-react';
 import { bib, noteLabel, relationships, str, useNote, type IndexedNote, type Json, type Query, type Repo, type SourceMatch } from '@gestalts/client';
-import { EditableNote, filterSources, sourceSummary } from '../../widgets';
+import { EditableNote, filterSources, saveRawSynced, sourceSummary } from '../../widgets';
 import { definePerspective } from '../define/definePerspective';
 import { asSource, citekeyFor, duplicateCitekeys, fieldText, fieldValue, model, withField } from './sourceModel';
 
@@ -188,7 +188,7 @@ function SourceDetail({ repo, sourceKey, all, duplicate, onOpen, onBack }: {
       </div>
       {updating && <BibtexUpdate repo={repo} note={note} onDone={() => setUpdating(false)} />}
       {raw ? (
-        <EditableNote note={note} inspect={(text) => repo.inspect(note.key, text)} save={(text) => repo.putRaw(note.key, text)} />
+        <EditableNote note={note} inspect={(text) => repo.inspect(note.key, text)} save={(text) => saveRawSynced(repo, note.key, text)} />
       ) : (
         <div className="grid grid-cols-[8rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 text-sm">
           <FieldRow label="title" value={str(note, 'title') ?? ''} onCommit={(t) => set('title', fieldValue(t, 'literal'))} />

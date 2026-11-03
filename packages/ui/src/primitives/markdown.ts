@@ -66,6 +66,28 @@ export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&
 
 let links: MarkdownLinks = {};
 
+export type EmbedKind = 'image' | 'video' | 'audio' | 'file';
+
+const KINDS: Record<string, EmbedKind> = {
+  jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', bmp: 'image', svg: 'image', avif: 'image',
+  mp4: 'video', webm: 'video', mov: 'video', m4v: 'video',
+  mp3: 'audio', ogg: 'audio', wav: 'audio', m4a: 'audio', opus: 'audio', flac: 'audio',
+};
+
+/** What a blob is, by its extension. */
+export const embedKind = (name: string): EmbedKind => KINDS[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'file';
+
+/** An embedded blob: images, videos and audio shown, anything else as a link. */
+function embedHtml(target: string, src: string, label: string | undefined) {
+  const s = escapeHtml(src);
+  switch (embedKind(target)) {
+    case 'image': return `<img class="md-embed" src="${s}" alt="${escapeHtml(label ?? '')}">`;
+    case 'video': return `<video class="md-embed" src="${s}" controls preload="metadata"${label ? ` title="${escapeHtml(label)}"` : ''}></video>`;
+    case 'audio': return `<audio src="${s}" controls preload="metadata"${label ? ` title="${escapeHtml(label)}"` : ''}></audio>`;
+    default: return `<a href="${s}" download="${escapeHtml(target)}">${escapeHtml(label ?? target)}</a>`;
+  }
+}
+
 const extensions: MarkedExtension = {
   extensions: [
     {
@@ -97,7 +119,7 @@ const extensions: MarkedExtension = {
         if (embed) {
           const src = links.embed?.(target);
           return src
-            ? `<img class="max-h-80" src="${escapeHtml(src)}" alt="${escapeHtml(label ?? '')}">`
+            ? embedHtml(target, src, label)
             : `<span class="text-base-content/50 line-through" title="not attached">${escapeHtml(label ?? target)}</span>`;
         }
         const ref = links.reference?.(target) ?? { label: target, exists: true };
@@ -113,7 +135,11 @@ const extensions: MarkedExtension = {
 const marked = new Marked(extensions, { breaks: true, gfm: true });
 
 // MathML's `form` (prefix/postfix fences), which DOMPurify doesn't know; note links carry `data-note`
-const SANITIZE = { ADD_ATTR: ['form', 'data-note', 'target'] };
+// Blob embeds are object URLs (`blob:`), which DOMPurify's default URI allowlist would strip.
+const SANITIZE = {
+  ADD_ATTR: ['form', 'data-note', 'target', 'controls', 'preload', 'download'],
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|blob):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
+};
 
 let hooked = false;
 
@@ -122,7 +148,7 @@ export function renderMarkdown(text: string, with_: MarkdownLinks = {}): string 
   if (!hooked) {
     // registered on first use: DOMPurify needs a DOM, which tests importing this module may not have
     DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-      if (node.tagName === 'A' && node.hasAttribute('href') && !node.hasAttribute('data-note')) {
+      if (node.tagName === 'A' && node.hasAttribute('href') && !node.hasAttribute('data-note') && !node.hasAttribute('download')) {
         node.setAttribute('target', '_blank');
         node.setAttribute('rel', 'noopener');
       }

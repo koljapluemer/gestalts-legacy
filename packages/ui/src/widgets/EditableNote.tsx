@@ -11,6 +11,8 @@ type Props = {
   onClose?: () => void;
   onDelete?: () => void;
   autofocus?: boolean;
+  /** without its own card and header (label, key, close, delete): the owner shows those */
+  bare?: boolean;
 };
 
 /**
@@ -19,7 +21,7 @@ type Props = {
  * open (a canvas or cards save, a sync), saving merges the draft in per top-level key; if both changed the same key,
  * it asks before writing over the other change.
  */
-export function EditableNote({ note, inspect, save, onClose, onDelete, autofocus }: Props) {
+export function EditableNote({ note, inspect, save, onClose, onDelete, autofocus, bare = false }: Props) {
   // null: no unsaved edits, show the stored text
   const [draft, setDraft] = useState<string | null>(null);
   // the note's text when the draft started
@@ -47,19 +49,24 @@ export function EditableNote({ note, inspect, save, onClose, onDelete, autofocus
     await write(plan.text);
   };
 
+  const status = (
+    <>
+      {state.saving && <LoaderCircle className="size-4 animate-spin" />}
+      {draft !== null && !state.saving && <span className="badge badge-sm badge-ghost">unsaved</span>}
+    </>
+  );
   return (
     <section
-      className="card card-border bg-base-100"
+      className={bare ? '' : 'card card-border bg-base-100'}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) void commit(); }}
     >
-      <div className="card-body gap-2 p-3">
-        <header className="flex items-start gap-2">
+      <div className={bare ? 'flex flex-col gap-2' : 'card-body gap-2 p-3'}>
+        {bare ? <div className="flex min-h-5 justify-end gap-2 empty:hidden">{status}</div> : <header className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <h2 className="truncate font-semibold">{noteLabel(live)}</h2>
             <p className="truncate font-mono text-xs text-base-content/50">{note.key}</p>
           </div>
-          {state.saving && <LoaderCircle className="size-4 animate-spin" />}
-          {draft !== null && !state.saving && <span className="badge badge-sm badge-ghost">unsaved</span>}
+          {status}
           {onDelete && (
             <button type="button" className="btn btn-ghost btn-xs btn-square" title="Delete note" onClick={onDelete}>
               <Trash2 className="size-4" />
@@ -70,7 +77,7 @@ export function EditableNote({ note, inspect, save, onClose, onDelete, autofocus
               <X className="size-4" />
             </button>
           )}
-        </header>
+        </header>}
         <GestaltBadges gestalts={live.gestalts} lints={live.lints} />
         <YamlEditor value={text} inspect={inspect} onChange={(t) => { if (draft === null) setBase(note.raw); setDraft(t); }} onSave={() => void commit()} autofocus={autofocus} />
         {state.conflict && draft !== null && (

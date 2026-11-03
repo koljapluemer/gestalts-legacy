@@ -3,6 +3,7 @@ import { Layers, LoaderCircle, Plus, Trash2, FileCode } from 'lucide-react';
 import { cardId, fold, hashing, useQuery, type Card, type IndexedNote, type Part, type Repo, type Template } from '@gestalts/client';
 import { CodeMirrorHost } from '../primitives';
 import { finalCards } from './draftMerge';
+import { withInline } from './noteText';
 
 /** The old, attached form of each part, retired notes included. */
 const OLD: Record<Exclude<Part, 'canvas'>, { tagsAll: string[] }> = { cards: { tagsAll: ['flashcard'] }, template: { tagsAll: ['template'] } };
@@ -125,7 +126,9 @@ function CardsEditor({ note, repo, stored, old }: Props & { stored: Card[]; old:
     const host = repo.get(note.key);
     if (!host) throw new Error(`No note ${note.key}`);
     const attached = fold.attached(repo.query(OLD.cards), host.id, 'cards');
-    await fold.writeFold(repo, note.key, fold.foldWrites(host, 'cards', finalCards(cards, cardId), attached, hashing));
+    const writes = fold.foldWrites(host, 'cards', finalCards(cards, cardId), attached, hashing);
+    // card text may reference notes and embed blobs, like `main`
+    await fold.writeFold(repo, note.key, { ...writes, host: withInline(writes.host) });
   });
   const cards = draft.value;
   const set = (i: number, patch: Partial<Card>) => draft.edit(cards.map((c, j) => (j === i ? { ...c, ...patch } : c)));

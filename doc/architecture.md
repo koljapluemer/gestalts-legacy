@@ -49,9 +49,9 @@ The repo's `upstreamReport()` says what the last check did; the Demo logs it to 
 Each layer imports only from layers below. All may use `@gestalts/client` and external packages.
 Tailwind + daisyUI + lucide are the real primitives; `primitives/` only adds what they lack.
 
-- `primitives/`: CodeMirror host and theme, `HighlightedText`, text folding, `Markdown` (math, `[[id|label]]` links, `![[blob]]` embeds)
+- `primitives/`: CodeMirror host and theme, `HighlightedText`, text folding, `Markdown` (math, `[[id|label]]` links, `![[blob]]` embeds: images, video, audio, else a link), `MarkdownEditor` (`[[` completion, references openable with Mod-click)
 - `components/`: `NoteLine`, `GestaltBadges`, `YamlEditor`
-- `widgets/`: `NoteResultList` (with per-result actions), `EditableNote`, `NoteParts` (cards and template editors), `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
+- `widgets/`: `NoteResultList` (with per-result actions), `NoteView`, `NoteTextEditor`, `EditableNote` (YAML), `NoteParts` (cards and template editors), `Relationships` (with backlinks), `MediaGallery`, `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
 - `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `new-note`, `greek-alphabet`, `connector-settings`, `canvas`, `typst-editor`, `sources`. Slices don't import each other, except the shared `define` slice.
 - `panes/`: `ExplorerPane` (search + editor), `NewNotePane` (the new-note form on its own), `CanvasPane`, `Canvas2TypPane` (a note's canvas beside its Typst document), `SourcesPane`, `GreekAlphabetPane`. They share `SearchLayout`: the search on the right, whose results offer the pane's actions (open as canvas, add to this canvas, …), and at most one overlay over the pane (`panes/overlay.ts`): a note in the editor, or the new-note form the search's "+" opens. The overlay lives in the URL (`?overlay=note:<key>` or `new`); opening one pushes a history entry, so Back closes it, and opening another from inside it replaces it. Panes import perspectives only, through `perspectives/index.ts`.
 
@@ -99,6 +99,33 @@ The Typst editor compiles through the connector's `typst@1` service (`plugins/ty
 document's `assets` (path → blob, fetched by the worker) and a bibliography of the sources it cites
 (`/sources.bib`). Without the service the document is still editable and shows its last built PDF. Build PDF stores
 the PDF as a content-addressed blob labelled `pdf`; saving adds a `cites` relationship to each source cited.
+
+## Note view
+
+The editor (`universal-editor`) shows a note in one of three modes, remembered per note for the browser session:
+- **Read** (`widgets/NoteView.tsx`): its images and videos (blobs labelled `image`/`video`, or unlabelled ones that
+  are by extension) in a gallery, then `tasks`, `main`, `extra` and its cards rendered, then its other blobs as links.
+- **Text** (`widgets/NoteTextEditor.tsx`): title, `main` and `extra` as Markdown, with a preview beside them (below
+  when narrow). `[[` completes a note from the search and inserts its id. Mod-click on a reference opens it, and on
+  touch screens a button above the reference under the cursor does. Saves on blur and Mod-s, field by field against
+  the note as it is by then. If the note changed one of the same fields meanwhile, it asks.
+- **YAML**: the raw note, as before.
+
+Images and videos are attached from the toolbar (on touch screens also from the camera), or by pasting or dropping
+them into the text. They're written at once, as content-addressed blobs. Images are downscaled to 1920 px and
+re-encoded as WebP (lossless from PNG and BMP; GIF and SVG kept as they are). Videos up to 250 MB are stored as they
+are. Removing one takes it off `blobs`; the blob itself stays.
+
+Every save of the text, of the YAML or of the cards keeps the note's `inline` relationships in step with the
+`[[references]]` in `main`, `extra` and its cards, and lists each `![[embed]]` in `blobs` (`syncInline`,
+`packages/client/src/inline.ts`). The copy-on-write closure and backlinks then follow prose links like any other
+relationship. A YAML save is written as typed unless that changes something.
+
+`Relationships` lists a note's own relationships (`→`), its inline references (`⇢`) and its backlinks (`←`, `⇠`).
+The backlinks come from one index per repo version, built from every note's relationships and from the references
+in their text, so notes edited elsewhere count too. Explicit rows can be detached and relabelled, and the adder
+relates a picked note in either direction. Each change is written at once, to whichever note holds the relationship.
+Inline rows are edited in the text.
 
 ## Search sidebar
 

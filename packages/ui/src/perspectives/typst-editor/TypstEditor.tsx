@@ -6,9 +6,9 @@ import { typst_lezer } from 'codemirror-lang-typst/lezer';
 import { FileDown, Image, LoaderCircle, Quote, Upload } from 'lucide-react';
 import { bib, blob, blobs, relationships, str, useBlobUrl, useNote, type IndexedNote, type Query, type ServiceClient, type Source } from '@gestalts/client';
 import { CodeMirrorHost } from '../../primitives';
-import { SourcePicker, sourceSummary } from '../../widgets';
+import { SourcePicker, blobName, sourceSummary } from '../../widgets';
 import { definePerspective } from '../define/definePerspective';
-import { assetsOf, blobName, citation, DOCUMENT_OF, sourceOf, withAsset, withPdf, withSource } from './typstDocument';
+import { assetsOf, citation, DOCUMENT_OF, sourceOf, withAsset, withPdf, withSource } from './typstDocument';
 
 type Props = {
   /** key of the `typst-document@1` note */

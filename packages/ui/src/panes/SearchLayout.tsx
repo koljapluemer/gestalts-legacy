@@ -50,7 +50,7 @@ export function SearchLayout({ children, actions, onOpen, onCreate, openKeys }: 
       {overlay && (
         <Modal onClose={overlays.close}>
           {overlay.kind === 'note'
-            ? <UniversalEditor key={overlay.key} open={[overlay.key]} onClose={overlays.close} />
+            ? <UniversalEditor key={overlay.key} open={[overlay.key]} onClose={overlays.close} onOpen={(key) => overlays.open({ kind: 'note', key })} />
             : <NewNote key={JSON.stringify(overlay)} title={overlay.title} tags={overlay.tags} onCreated={created} onCancel={overlays.close} />}
         </Modal>
       )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mathAt, references } from './markdown';
+import { embedKind, mathAt, references } from './markdown';
 
 describe('markdown', () => {
   it('finds references and embeds outside code and math', () => {
@@ -14,5 +14,11 @@ describe('markdown', () => {
     expect(mathAt('$20 and $30', 0)).toBeNull();
     expect(mathAt('$$a\nb$$', 0)?.display).toBe(true);
     expect(mathAt('$$a\n\nb$$', 0)).toBeNull();
+  });
+});
+
+describe('embedKind', () => {
+  it('tells images, videos, audio and other files apart by extension', () => {
+    expect(['a.webp', 'b.JPG', 'c.mp4', 'd.mov', 'e.mp3', 'f.pdf', 'g'].map(embedKind)).toEqual(['image', 'image', 'video', 'video', 'audio', 'file', 'file']);
   });
 });

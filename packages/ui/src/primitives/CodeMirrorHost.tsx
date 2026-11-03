@@ -14,10 +14,13 @@ type Props = {
   onSave: () => void;
   /** the editor once mounted (null on unmount), for owners that insert at the cursor */
   onView?: (view: EditorView | null) => void;
+  /** line numbers in the gutter (default on) */
+  gutter?: boolean;
+  className?: string;
 };
 
 /** A CodeMirror editor with history, line numbers, wrapping and the daisyUI-based theme. */
-export function CodeMirrorHost({ value, extensions, autofocus = false, onChange, onSave, onView }: Props) {
+export function CodeMirrorHost({ value, extensions, autofocus = false, onChange, onSave, onView, gutter = true, className = '' }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const handlers = useRef({ onChange, onSave, onView });
@@ -31,7 +34,7 @@ export function CodeMirrorHost({ value, extensions, autofocus = false, onChange,
         extensions: [
           history(),
           drawSelection(),
-          lineNumbers(),
+          gutter ? lineNumbers() : [],
           EditorView.lineWrapping,
           keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { handlers.current.onSave(); return true; } }, indentWithTab, ...defaultKeymap, ...historyKeymap]),
           editorTheme,
@@ -54,5 +57,5 @@ export function CodeMirrorHost({ value, extensions, autofocus = false, onChange,
     }
   }, [value]);
 
-  return <div ref={host} className="rounded-box border border-base-300 focus-within:border-base-content/40" />;
+  return <div ref={host} className={`rounded-box border border-base-300 focus-within:border-base-content/40 ${className}`} />;
 }

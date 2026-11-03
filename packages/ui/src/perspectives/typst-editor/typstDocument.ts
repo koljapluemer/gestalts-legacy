@@ -62,11 +62,5 @@ export function assetsOf(doc: IndexedNote): Record<string, string> {
 
 export const sourceOf = (doc: IndexedNote) => str(doc, 'source') ?? '';
 
-/** A content-addressed blob name: the first 16 hex digits of the bytes' sha256, plus the extension. */
-export async function blobName(bytes: Uint8Array, ext: string): Promise<string> {
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
-  return Array.from(hash.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('') + (ext ? `.${ext.toLowerCase()}` : '');
-}
-
 /** How to cite a key: `@key` where Typst's reference syntax allows it, else `#cite(label("…"))`. */
 export const citation = (key: string) => (/^[\p{L}\p{N}_][\p{L}\p{N}_\-.:]*[\p{L}\p{N}_-]$|^[\p{L}\p{N}_]$/u.test(key) ? `@${key}` : `#cite(label(${JSON.stringify(key)}))`);
