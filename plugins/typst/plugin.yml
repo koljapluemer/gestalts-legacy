@@ -1,0 +1,16 @@
+schema: 1
+id: typst
+version: 0.1.0
+gestalts: []
+worker:
+  runtime: uv
+  project: worker
+  command: [python, -m, typst_worker]
+  services: [typst@1]
+  access:
+    read:
+      gestalts: [typst-document@1]
+    blobs:
+      read: referenced
+      write: false
+  network: []

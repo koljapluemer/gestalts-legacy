@@ -56,7 +56,16 @@ downloads a pinned uv release (checksum-verified) into its data folder. uv in tu
 so users install nothing.
 
 `GET /plugins` reports worker health, `POST /plugins/{id}/runs` starts a manual run, `GET /services` discovers
-services, and `/services/{id}/…` proxies them.
+services, and `/services/{id}/…` proxies them (with the query string and `Content-Type`; a service gets 30 s before the
+app sees a 504). A worker whose process has ended is restarted on the next run or service request, and its error
+says so meanwhile.
+
+Built-in plugins:
+- `conformance`: exercises the plugin contract.
+- `typst`: the `typst@1` service. `POST /services/typst@1/compile` with `{source, assets?: {path: blob}, bib?, format:
+  "svg" | "pdf"}` compiles in a fresh folder (assets at their paths, `bib` as `/sources.bib`, system fonts ignored)
+  and answers SVG pages as JSON, the PDF, or 422 `{diagnostics, missing}`. It reads `typst-document@1` notes and the
+  blobs they reference, and writes nothing.
 
 ## Access
 

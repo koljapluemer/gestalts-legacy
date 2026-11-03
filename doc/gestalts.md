@@ -26,7 +26,8 @@ Field types:
 - Strings: `string` (one line) and `text`.
 - Numbers: `number` and `integer`.
 - `bool`, `date` (`YYYY-MM-DD`), `datetime` (ISO 8601), `url`.
-- Collections: `string_list`, and `map`, which takes nested `fields`.
+- `partial_date`: `YYYY`, `YYYY-MM` or `YYYY-MM-DD`, or a range of two joined by `/` (either side may be open).
+- Collections: `string_list`; `list`, whose `items` rule every element follows; and `map`, which takes nested `fields`.
 - `any`.
 
 Field options:
@@ -49,5 +50,30 @@ Field options:
 | `link@1` | a well-formed `url` |
 | `pronunciation-card@1` | tag `pronunciation-card`, `title` (the term), blob `audio`, optional blob `image`, optional `lang` |
 | `fsrs-state@1` | tag `fsrs-state`, one relationship `reviews`, `model` (e.g. `FSRS-7`), `last_rating` 1–4, `card` (a ts-fsrs v6 card) |
+| `recurring@1` | tag `recurring`, `weekday` (`mo`…`su`), optional `until` (partial date) |
+| `daily@1` | tag `daily`, `date`; keyed `stableId("daily", date)`, so one note per date across devices |
+| `project@1` / `issue@1` | tag `project` / tag `issue` with at least one `project` relationship |
+| `published@1` | `publish_route` and `publish`: a note's text as published, apart from `main` |
+| `template@1` | tag `template`, `format` (`jinja-html`), `source` |
+| `source@1` | tag `source`, `title`, `citekey`, `entrytype` and biblatex fields (see [Sources](#sources)) |
+| `canvas@1` | tag `canvas`, `nodes` (each `id`, `x`, `y` and `text` or `note`), one `canvas-of` relationship |
+| `typst-document@1` | tag `typst`, `source`, `assets` (path → blob), blob `pdf` (at most one), `document-of` at most one |
+
+Relationship labels with a meaning: `card-of` (a flashcard extracted from a note), `canvas-of` and `on-canvas` (a canvas
+and each note on it), `document-of` and `cites` (a Typst document, its note and the sources it cites), `template-of`.
+
+## Sources
+
+`source@1` is the biblatex model: `entrytype` (`article`, `book`, `incollection`, `inproceedings`, `thesis`, `report`,
+`online`, `software`, `misc`), names (`author`, `editor`) as `family, given`, `family, suffix, given` or one name
+without a comma (an organisation), lists (`publisher`, `institution`, `organization`, `location`), partial dates
+(`date`, `urldate`) and literals. Braces protect case as in BibTeX (`{NASA}`), `$…$` is math. `bib_extra` keeps
+imported fields the model has no place for, so they're written back on export. The `citekey` should be unique;
+the Sources pane flags duplicates.
+
+`crates/core/src/bib.rs` reads BibTeX (legacy types and fields mapped: `journal` → `journaltitle`, `year`+`month` →
+`date`, `phdthesis` → `thesis` + `type`), writes biblatex, finds the source an entry probably is (a shared DOI, ISBN or
+eprint decides; else title, first author and year, loosely), merges an entry into a source, and lists the keys a Typst
+document cites. The client exposes it as `bib`.
 
 Learner state is a separate note that `reviews` the card. It is not stored in the card itself. That way content can stay read-only (shipped in Demo's `public/`) while each learner's progress lives elsewhere.

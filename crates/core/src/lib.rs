@@ -1,6 +1,7 @@
 //! gestalts core: notes (YAML) and blobs behind a storage port, gestalts, querying and merging.
 //! No IO here; adapters live in `gestalts-fs` (disk) and `gestalts-wasm` (browser).
 
+pub mod bib;
 pub mod gestalt;
 pub mod merge;
 pub mod note;

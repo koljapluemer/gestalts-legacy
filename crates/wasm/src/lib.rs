@@ -176,3 +176,55 @@ pub fn new_id() -> String {
 pub fn stable_id(namespace: &str, name: &str) -> String {
     gestalts_core::stable_id(namespace, name)
 }
+
+/// BibTeX text as sources: `[{source, warnings}]`.
+#[wasm_bindgen(js_name = bibParse)]
+pub fn bib_parse(text: &str) -> Result<JsValue, JsError> {
+    to_js(&gestalts_core::bib::parse(text).map_err(|e| JsError::new(&e))?)
+}
+
+/// Sources (note values) as biblatex text.
+#[wasm_bindgen(js_name = bibWrite)]
+pub fn bib_write(sources: JsValue) -> Result<String, JsError> {
+    Ok(gestalts_core::bib::write(&from_js::<Vec<serde_json::Map<String, serde_json::Value>>>(sources)?))
+}
+
+/// The existing sources (`[{key, source}]`) that may be `entry`, best first: `[{key, level, reasons}]`.
+#[wasm_bindgen(js_name = bibMatches)]
+pub fn bib_matches(entry: JsValue, sources: JsValue, limit: usize) -> Result<JsValue, JsError> {
+    #[derive(serde::Deserialize)]
+    struct Existing {
+        key: String,
+        source: serde_json::Map<String, serde_json::Value>,
+    }
+    let existing: Vec<Existing> = from_js(sources)?;
+    let existing: Vec<_> = existing.into_iter().map(|e| (e.key, e.source)).collect();
+    to_js(&gestalts_core::bib::matches(&from_js(entry)?, &existing, limit))
+}
+
+/// `current` updated from `incoming`: `{source, filled, conflicts}`; fields in `take` are replaced.
+#[wasm_bindgen(js_name = bibMerge)]
+pub fn bib_merge(current: JsValue, incoming: JsValue, take: Vec<String>) -> Result<JsValue, JsError> {
+    to_js(&gestalts_core::bib::merge(&from_js(current)?, &from_js(incoming)?, &take))
+}
+
+#[wasm_bindgen(js_name = bibUniqueCitekey)]
+pub fn bib_unique_citekey(key: &str, taken: Vec<String>) -> String {
+    gestalts_core::bib::unique_citekey(key, &taken.into_iter().collect())
+}
+
+/// The keys a Typst document cites, in order.
+#[wasm_bindgen(js_name = bibCitedKeys)]
+pub fn bib_cited_keys(text: &str) -> Vec<String> {
+    gestalts_core::bib::cited_keys(text)
+}
+
+/// `{entryTypes: [[type, [field…]]…], fields: [[field, kind]…]}`
+#[wasm_bindgen(js_name = bibModel)]
+pub fn bib_model() -> Result<JsValue, JsError> {
+    to_js(&serde_json::json!({ "entryTypes": gestalts_core::bib::ENTRY_TYPES, "fields": gestalts_core::bib::FIELDS }))
+}
+
+fn from_js<T: serde::de::DeserializeOwned>(v: JsValue) -> Result<T, JsError> {
+    serde_wasm_bindgen::from_value(v).map_err(|e| JsError::new(&e.to_string()))
+}

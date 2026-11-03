@@ -1,4 +1,4 @@
-import init, { WasmRepo, newId as wasmNewId } from '../wasm/gestalts.js';
+import init, { WasmRepo, newId as wasmNewId, stableId as wasmStableId } from '../wasm/gestalts.js';
 import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
 
 export type RepoSource =
@@ -206,6 +206,11 @@ export class Repo {
 
 export function newId(): string {
   return wasmNewId();
+}
+
+/** The same id for the same `name` within `namespace` (uuid5), e.g. one daily note per date. */
+export function stableId(namespace: string, name: string): string {
+  return wasmStableId(namespace, name);
 }
 
 const MIME: Record<string, string> = {

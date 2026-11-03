@@ -49,11 +49,11 @@ The repo's `upstreamReport()` says what the last check did; the Demo logs it to 
 Each layer imports only from layers below. All may use `@gestalts/client` and external packages.
 Tailwind + daisyUI + lucide are the real primitives; `primitives/` only adds what they lack.
 
-- `primitives/`: CodeMirror host and theme, `HighlightedText`, text folding
+- `primitives/`: CodeMirror host and theme, `HighlightedText`, text folding, `Markdown` (math, `[[id|label]]` links, `![[blob]]` embeds)
 - `components/`: `NoteLine`, `GestaltBadges`, `YamlEditor`
-- `widgets/`: `NoteResultList`, `EditableNote`
-- `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `greek-alphabet`, `connector-settings`. Slices don't import each other, except the shared `define` slice.
-- `panes/`: `ExplorerPane` (search + editor), `GreekAlphabetPane`. Panes import perspectives only, through `perspectives/index.ts`.
+- `widgets/`: `NoteResultList` (with per-result actions), `EditableNote`, `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
+- `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `new-note`, `greek-alphabet`, `connector-settings`, `canvas`, `typst-editor`, `sources`. Slices don't import each other, except the shared `define` slice.
+- `panes/`: `ExplorerPane` (search + editor), `NewNotePane` (the new-note form on its own), `CanvasPane`, `Canvas2TypPane` (a note's canvas beside its Typst document), `SourcesPane`, `GreekAlphabetPane`. They share `SearchLayout`: the search on the right, whose results offer the pane's actions (open as canvas, add to this canvas, …), and at most one overlay over the pane (`panes/overlay.ts`): a note in the editor, or the new-note form the search's "+" opens. The overlay lives in the URL (`?overlay=note:<key>` or `new`); opening one pushes a history entry, so Back closes it, and opening another from inside it replaces it. Panes import perspectives only, through `perspectives/index.ts`.
 
 `oxlint.config.ts` enforces this (eslint-plugin-boundaries). Within primitives, components and widgets, files of the same layer may share code. "Not from neighbours" is enforced between perspective slices only.
 
@@ -77,6 +77,21 @@ A perspective's ports:
 - Its own props: inputs and events.
 
 The pane that hosts it wires those props. For example, `ExplorerPane` passes `SearchSidebar`'s `onOpen` into `UniversalEditor`'s `open` list, which it keeps in the URL. That is how panes orchestrate events between perspectives. There is no global event bus.
+
+Optional event props are capabilities: if the host leaves one unwired, the perspective hides the UI for it (no "+" without `onCreate`, no open buttons without `onOpen`). A perspective never knows how it is presented, inline or in a modal. Nothing is written to storage just to show something: the new-note form writes the note only on Create.
+
+## Canvas and Typst
+
+A canvas is a `canvas@1` note about its host note (`canvas-of`), made on the first change under the key
+`stableId("canvas", hostId)`. While it's open, the page's reducer is the only truth (`perspectives/canvas/model.ts`);
+`CanvasSaver` writes whole snapshots, debounced, one at a time, held while dragging. If the stored nodes change to
+something this page didn't write (a sync, the YAML editor), it stops writing and offers to reload. Linked notes are
+also `on-canvas` relationships, so they travel with the canvas.
+
+The Typst editor compiles through the connector's `typst@1` service (`plugins/typst`), sending the source, the
+document's `assets` (path → blob, fetched by the worker) and a bibliography of the sources it cites
+(`/sources.bib`). Without the service the document is still editable and shows its last built PDF. Build PDF stores
+the PDF as a content-addressed blob labelled `pdf`; saving adds a `cites` relationship to each source cited.
 
 ## Search sidebar
 

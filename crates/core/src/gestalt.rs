@@ -48,6 +48,9 @@ pub struct FieldRule {
     /// for `type: map`
     #[serde(default)]
     pub fields: BTreeMap<String, FieldRule>,
+    /// for `type: list`: the rule every item follows
+    #[serde(default)]
+    pub items: Option<Box<FieldRule>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq)]
@@ -64,10 +67,14 @@ pub enum FieldType {
     Bool,
     /// `YYYY-MM-DD`
     Date,
+    /// `YYYY`, `YYYY-MM` or `YYYY-MM-DD`, or a range of two of them joined by `/` (either side may be open)
+    PartialDate,
     /// ISO 8601 `YYYY-MM-DDTHH:MM...`
     Datetime,
     Url,
     StringList,
+    /// a list; `items` checks each element
+    List,
     Map,
 }
 
@@ -135,9 +142,11 @@ fn check_field(path: &str, v: Option<&Value>, rule: &FieldRule, lint: &mut impl 
         FieldType::Integer => v.is_i64() || v.is_u64(),
         FieldType::Bool => v.is_bool(),
         FieldType::Date => v.as_str().is_some_and(is_date),
+        FieldType::PartialDate => v.as_str().is_some_and(is_partial_date_range),
         FieldType::Datetime => v.as_str().is_some_and(is_datetime),
         FieldType::Url => v.as_str().is_some_and(is_url),
         FieldType::StringList => v.as_sequence().is_some_and(|s| s.iter().all(Value::is_string)),
+        FieldType::List => v.is_sequence(),
         FieldType::Map => v.is_mapping(),
     };
     if !ok {
@@ -168,6 +177,28 @@ fn check_field(path: &str, v: Option<&Value>, rule: &FieldRule, lint: &mut impl 
             check_field(&format!("{path}.{sub}"), m.get(sub.as_str()), sub_rule, lint);
         }
     }
+    if let (Value::Sequence(items), Some(item_rule)) = (v, &rule.items) {
+        for (i, item) in items.iter().enumerate() {
+            check_field(&format!("{path}.{i}"), Some(item), item_rule, lint);
+        }
+    }
+}
+
+/// `items` belongs to lists and `fields` to maps; anything else is a mistake in the definition.
+fn check_rule(path: &str, rule: &FieldRule) -> Result<(), String> {
+    if rule.items.is_some() && rule.ty != FieldType::List {
+        return Err(format!("{path}: `items` needs `type: list`"));
+    }
+    if !rule.fields.is_empty() && rule.ty != FieldType::Map {
+        return Err(format!("{path}: `fields` needs `type: map`"));
+    }
+    for (sub, r) in &rule.fields {
+        check_rule(&format!("{path}.{sub}"), r)?;
+    }
+    if let Some(r) = &rule.items {
+        check_rule(&format!("{path}[]"), r)?;
+    }
+    Ok(())
 }
 
 fn check_counts(kind: &str, refs: &[Ref], rules: &BTreeMap<String, Count>, lint: &mut impl FnMut(String, String)) {
@@ -191,9 +222,11 @@ fn type_name(t: FieldType) -> &'static str {
         FieldType::Integer => "an integer",
         FieldType::Bool => "true or false",
         FieldType::Date => "a date (YYYY-MM-DD)",
+        FieldType::PartialDate => "a date (YYYY, YYYY-MM or YYYY-MM-DD, or a range a/b)",
         FieldType::Datetime => "a datetime (YYYY-MM-DDTHH:MM…)",
         FieldType::Url => "a URL",
         FieldType::StringList => "a list of strings",
+        FieldType::List => "a list",
         FieldType::Map => "a map",
     }
 }
@@ -205,6 +238,24 @@ fn is_date(s: &str) -> bool {
     }
     let num = |r: std::ops::Range<usize>| s[r].parse::<u32>().ok();
     matches!((num(0..4), num(5..7), num(8..10)), (Some(_), Some(m @ 1..=12), Some(d @ 1..=31)) if m > 0 && d > 0)
+}
+
+fn is_partial_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    let year = |r: std::ops::Range<usize>| s.get(r).is_some_and(|y| y.len() == 4 && y.bytes().all(|c| c.is_ascii_digit()));
+    match b.len() {
+        4 => year(0..4),
+        7 => year(0..4) && b[4] == b'-' && s[5..7].parse::<u32>().is_ok_and(|m| (1..=12).contains(&m)),
+        10 => is_date(s),
+        _ => false,
+    }
+}
+
+pub(crate) fn is_partial_date_range(s: &str) -> bool {
+    match s.split_once('/') {
+        None => is_partial_date(s),
+        Some((a, b)) => (a.is_empty() || is_partial_date(a)) && (b.is_empty() || is_partial_date(b)) && !(a.is_empty() && b.is_empty()),
+    }
 }
 
 fn is_datetime(s: &str) -> bool {
@@ -232,6 +283,15 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../gestalts/link/v1.yml"),
     include_str!("../../../gestalts/pronunciation-card/v1.yml"),
     include_str!("../../../gestalts/fsrs-state/v1.yml"),
+    include_str!("../../../gestalts/recurring/v1.yml"),
+    include_str!("../../../gestalts/daily/v1.yml"),
+    include_str!("../../../gestalts/project/v1.yml"),
+    include_str!("../../../gestalts/issue/v1.yml"),
+    include_str!("../../../gestalts/published/v1.yml"),
+    include_str!("../../../gestalts/template/v1.yml"),
+    include_str!("../../../gestalts/source/v1.yml"),
+    include_str!("../../../gestalts/canvas/v1.yml"),
+    include_str!("../../../gestalts/typst-document/v1.yml"),
 ];
 
 impl Gestalts {
@@ -244,6 +304,11 @@ impl Gestalts {
             .iter()
             .map(|s| serde_yaml_ng::from_str::<GestaltDef>(s).map_err(|e| e.to_string()))
             .collect::<Result<Vec<_>, _>>()?;
+        for d in &defs {
+            for (field, rule) in &d.fields {
+                check_rule(field, rule).map_err(|e| format!("{}: {e}", d.id()))?;
+            }
+        }
         Ok(Gestalts { defs })
     }
 
@@ -322,5 +387,42 @@ mod tests {
         assert!(paths.contains(&"last_rating".to_string()));
         assert!(paths.contains(&"card.dueAt".to_string()));
         assert!(paths.contains(&"relationships.reviews".to_string()));
+    }
+
+    #[test]
+    fn partial_dates() {
+        for ok in ["2026", "2026-05", "2026-05-17", "2020/2021", "2020-05/", "/2021"] {
+            assert!(is_partial_date_range(ok), "{ok}");
+        }
+        for bad in ["26", "2026-13", "2026-5", "/", "2026-05-32", "may 2026"] {
+            assert!(!is_partial_date_range(bad), "{bad}");
+        }
+        let g = Gestalts::builtin();
+        assert_eq!(g.of(&note("tags: [appointment]\ndate: 2026-11\n")), vec!["appointment@1"]);
+    }
+
+    #[test]
+    fn list_items_are_checked() {
+        let g = Gestalts::builtin();
+        let ok = note("tags: [canvas]\nrelationships: [{to: h, label: canvas-of}]\nnodes:\n  - {id: a, x: 0, y: 1.5, text: hi}\n  - {id: b, x: 3, y: 4, note: n}\n");
+        assert_eq!(g.of(&ok), vec!["canvas@1"], "{:?}", g.lint(&ok));
+        let bad = note("tags: [canvas]\nrelationships: [{to: h, label: canvas-of}]\nnodes:\n  - {id: a, x: left, y: 0}\n  - 7\n");
+        let paths: Vec<_> = g.lint(&bad).into_iter().map(|l| l.path).collect();
+        assert_eq!(paths, vec!["nodes.0.x", "nodes.1"]);
+    }
+
+    #[test]
+    fn misplaced_items_or_fields_are_rejected() {
+        assert!(Gestalts::from_yaml(&["name: x\nversion: 1\nfields:\n  a: { type: map, items: { type: string } }\n"]).is_err());
+        assert!(Gestalts::from_yaml(&["name: x\nversion: 1\nfields:\n  a: { type: list, fields: { b: { type: string } } }\n"]).is_err());
+    }
+
+    #[test]
+    fn source_and_typst_document() {
+        let g = Gestalts::builtin();
+        let s = note("tags: [source]\ntitle: Attention Is All You Need\ncitekey: vaswani2017\nentrytype: inproceedings\nauthor: [\"Vaswani, Ashish\", World Health Organization]\ndate: 2017-06\nvolume: \"30\"\nurl: https://arxiv.org/abs/1706.03762\nbib_extra: {keywords: transformers}\n");
+        assert_eq!(g.of(&s), vec!["link@1", "source@1"], "{:?}", g.lint(&s));
+        let t = note("tags: [typst]\nsource: \"= Hi\"\nassets: {/images/a.webp: 0123456789abcdef.webp}\nrelationships: [{to: h, label: document-of}]\n");
+        assert_eq!(g.of(&t), vec!["typst-document@1"], "{:?}", g.lint(&t));
     }
 }

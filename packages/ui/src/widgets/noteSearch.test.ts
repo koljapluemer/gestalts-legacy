@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IndexedNote } from '@gestalts/client';
-import { buildIndex, parseQuery, search } from './search';
+import { buildIndex, parseQuery, search } from './noteSearch';
 
 function note(key: string, value: Record<string, unknown>, gestalts: string[] = []): IndexedNote {
   const raw = Object.entries(value).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n');

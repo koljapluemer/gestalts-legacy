@@ -39,5 +39,14 @@ class ConnectorClient:
     def delete_note(self, key: str) -> None:
         self._request("DELETE", "/notes/" + urllib.parse.quote(key, safe=""))
 
+    def read_blob(self, name: str) -> bytes | None:
+        """None when it's missing, or not readable for this worker (not referenced by a note it may read)."""
+        try:
+            return self._request("GET", "/blobs/" + urllib.parse.quote(name, safe=""))
+        except RuntimeError as error:
+            if "returned 404" in str(error):
+                return None
+            raise
+
     def write_blob(self, name: str, data: bytes) -> None:
         self._request("PUT", "/blobs/" + urllib.parse.quote(name, safe=""), data, "application/octet-stream")

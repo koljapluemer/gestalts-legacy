@@ -1,5 +1,5 @@
 import { aliases, noteLabel, str, tags, type IndexedNote } from '@gestalts/client';
-import { words } from '../../primitives';
+import { words } from '../primitives';
 
 /**
  * Search as you type, all client side.

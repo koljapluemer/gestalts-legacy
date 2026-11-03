@@ -154,7 +154,7 @@ impl PluginHost {
         for _ in 0..50 {
             if let Ok(response) = self.client.get(format!("{url}/_gestalts/health")).send().await
                 && let Ok(health) = response.json::<Health>().await && health.protocol == 1 {
-                let mut p = plugin.lock().await; p.view.state = PluginState::Ready; return Ok(());
+                let mut p = plugin.lock().await; p.view.state = PluginState::Ready; p.view.error = None; return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -182,6 +182,7 @@ impl PluginHost {
 
     async fn run_with(&self, id: &str, trigger: TriggerRequest, note_keys: Vec<String>) -> Result<String, String> {
         let plugin = self.inner.read().await.get(id).cloned().ok_or_else(|| "unknown plugin".to_string())?;
+        self.revive(&plugin).await;
         let (url, run_id) = {
             let mut p = plugin.lock().await;
             if p.view.state != PluginState::Ready { return Err("plugin is not ready".into()); }
@@ -226,10 +227,37 @@ impl PluginHost {
         out
     }
 
+    /// The worker serving `service`, restarted first if its process has ended.
     pub async fn service_url(&self, service: &str) -> Option<String> {
         let plugins: Vec<_> = self.inner.read().await.values().cloned().collect();
-        for p in plugins { let p = p.lock().await; if p.view.services.iter().any(|s| s == service) && matches!(p.view.state, PluginState::Ready | PluginState::Running) { return p.worker_url.clone(); } }
+        for plugin in plugins {
+            if !plugin.lock().await.view.services.iter().any(|s| s == service) { continue; }
+            self.revive(&plugin).await;
+            let p = plugin.lock().await;
+            return matches!(p.view.state, PluginState::Ready | PluginState::Running).then(|| p.worker_url.clone()).flatten();
+        }
         None
+    }
+
+    /// The HTTP client for talking to workers.
+    pub fn client(&self) -> &reqwest::Client { &self.client }
+
+    /// Restarts a worker whose process has ended (crashed, killed), so one failure doesn't leave its runs and
+    /// services dead until the connector restarts. Its view says what happened meanwhile.
+    async fn revive(&self, plugin: &Arc<Mutex<HostedPlugin>>) {
+        {
+            let mut p = plugin.lock().await;
+            let Some(Ok(Some(status))) = p.child.as_mut().map(Child::try_wait) else { return };
+            p.child = None;
+            p.view.state = PluginState::Error;
+            p.view.error = Some(format!("worker exited ({status}); restarting"));
+        }
+        let UvState::Ready { path, .. } = self.uv_state() else { return };
+        if let Err(e) = self.start(plugin.clone(), &path).await {
+            let mut p = plugin.lock().await;
+            p.view.state = PluginState::Error;
+            p.view.error = Some(e);
+        }
     }
 
     pub async fn policy_for_token(&self, token: &str) -> Option<gestalts_plugin_host::Access> {

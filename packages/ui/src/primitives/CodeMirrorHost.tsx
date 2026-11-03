@@ -12,14 +12,16 @@ type Props = {
   onChange: (doc: string) => void;
   /** Mod-s */
   onSave: () => void;
+  /** the editor once mounted (null on unmount), for owners that insert at the cursor */
+  onView?: (view: EditorView | null) => void;
 };
 
 /** A CodeMirror editor with history, line numbers, wrapping and the daisyUI-based theme. */
-export function CodeMirrorHost({ value, extensions, autofocus = false, onChange, onSave }: Props) {
+export function CodeMirrorHost({ value, extensions, autofocus = false, onChange, onSave, onView }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const handlers = useRef({ onChange, onSave });
-  useEffect(() => { handlers.current = { onChange, onSave }; });
+  const handlers = useRef({ onChange, onSave, onView });
+  useEffect(() => { handlers.current = { onChange, onSave, onView }; });
 
   useEffect(() => {
     const editor = new EditorView({
@@ -39,8 +41,9 @@ export function CodeMirrorHost({ value, extensions, autofocus = false, onChange,
       }),
     });
     view.current = editor;
+    handlers.current.onView?.(editor);
     if (autofocus) editor.focus();
-    return () => { view.current = null; editor.destroy(); };
+    return () => { view.current = null; handlers.current.onView?.(null); editor.destroy(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mounted once; `value` is reconciled below
   }, []);
 

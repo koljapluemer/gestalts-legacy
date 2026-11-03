@@ -5,6 +5,10 @@
 - **Browser plugin** (e.g. vocabulary from Duolingo): it would write through the connector API.
 - Modification times in the `Storage` port, which the search would need for a "recent" list.
 - Authentication for the connector (a token per app).
+- A Learn pane for `flashcard@1` notes (the ones migrated from dsl have no review state yet; `fsrs-state@1` is ready for it).
+- Rendering `main` as Markdown in the Explorer, with `[[id]]` links and `![[blob]]` embeds (the canvas does already).
+- Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).
+- Undo for more than the last canvas removal; text ↔ note conversions are not undoable yet.
 - Learner activity and time statistics. The original sam-learns app had these; they weren't migrated.
 - Decks, beyond copy-on-write ([architecture.md](architecture.md#copy-on-write-from-a-deck)):
   - a "download the whole deck" action that copies everything up front, for offline use or archiving

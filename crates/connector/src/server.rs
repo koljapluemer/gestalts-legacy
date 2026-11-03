@@ -281,10 +281,16 @@ async fn list_services(State(s): State<AppState>) -> Json<Vec<ServiceView>> {
     Json(s.plugins.services().await.into_iter().map(|(id, available)| ServiceView { id, available }).collect())
 }
 
-async fn proxy_service(State(s): State<AppState>, UrlPath((service, path)): UrlPath<(String, String)>, method: Method, body: Bytes) -> Response {
+/// How long a service may take to answer (a Typst compile, an OCR run) before the app gets a 504.
+const SERVICE_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn proxy_service(State(s): State<AppState>, UrlPath((service, path)): UrlPath<(String, String)>, method: Method,
+    uri: axum::http::Uri, headers: HeaderMap, body: Bytes) -> Response {
     let Some(base) = s.plugins.service_url(&service).await else { return StatusCode::SERVICE_UNAVAILABLE.into_response() };
-    let url = format!("{base}/services/{service}/{path}");
-    match reqwest::Client::new().request(method, url).body(body).send().await {
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    let mut request = s.plugins.client().request(method, format!("{base}/services/{service}/{path}{query}")).timeout(SERVICE_TIMEOUT).body(body);
+    if let Some(value) = headers.get(header::CONTENT_TYPE) { request = request.header(header::CONTENT_TYPE, value); }
+    match request.send().await {
         Ok(r) => {
             let status = r.status();
             let content_type = r.headers().get(header::CONTENT_TYPE).cloned();
@@ -297,6 +303,7 @@ async fn proxy_service(State(s): State<AppState>, UrlPath((service, path)): UrlP
                 Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
             }
         }
+        Err(e) if e.is_timeout() => (StatusCode::GATEWAY_TIMEOUT, format!("{service} took longer than {}s", SERVICE_TIMEOUT.as_secs())).into_response(),
         Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
     }
 }

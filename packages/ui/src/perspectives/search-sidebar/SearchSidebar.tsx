@@ -1,26 +1,31 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
-import { newId, tags as tagsOf, type Query } from '@gestalts/client';
-import { NoteResultList } from '../../widgets';
+import { tags as tagsOf, type Query } from '@gestalts/client';
+import { NoteResultList, buildIndex, search, type NoteAction } from '../../widgets';
 import { definePerspective } from '../define/definePerspective';
-import { buildIndex, search } from './search';
+
+export type { NoteAction };
 
 const PAGE = 50;
 const TOP_TAGS = 12;
 
 type Props = {
-  /** a note was picked (or created) */
+  /** a note was picked */
   onOpen: (key: string) => void;
+  /** given: a "+" asks for a new note, prefilled from the query and tag filter */
+  onCreate?: (prefill: { title?: string; tags: string[] }) => void;
   /** keys currently open elsewhere, shown marked */
   openKeys?: string[];
+  /** what the hosting pane can do with a result, besides opening it */
+  actions?: NoteAction[];
 };
 
-/** Find any note by text, tag or gestalt; create new ones. `/` focuses the search. */
+/** Find any note by text, tag or gestalt; ask for new ones. `/` focuses the search. */
 export const SearchSidebar = definePerspective<{ all: Query }, Props>({
   id: 'search-sidebar',
   title: 'Search',
   data: { all: {} },
-  Component: ({ data, repo, onOpen, openKeys = [] }) => {
+  Component: ({ data, onOpen, onCreate, openKeys = [], actions = [] }) => {
     const [query, setQuery] = useState('');
     const [tagFilter, setTagFilter] = useState<string[]>([]);
     const [active, setActive] = useState(0);
@@ -53,12 +58,10 @@ export const SearchSidebar = definePerspective<{ all: Query }, Props>({
 
     const reset = () => { setActive(0); setLimit(PAGE); };
 
-    const create = async () => {
-      const id = newId();
-      const title = query.trim() && !query.includes(':') && !query.includes('#') ? query.trim() : '';
-      const tagLine = tagFilter.length ? `[${tagFilter.join(', ')}]` : '[]';
-      await repo.putRaw(id, `id: ${id}\ntitle: ${JSON.stringify(title)}\ntags: ${tagLine}\nmain: |\n  \n`);
-      onOpen(id);
+    // the query becomes the title unless it's filters
+    const prefill = () => {
+      const title = query.trim() && !query.includes(':') && !query.includes('#') ? query.trim() : undefined;
+      return { ...(title ? { title } : {}), tags: tagFilter };
     };
 
     return (
@@ -80,9 +83,11 @@ export const SearchSidebar = definePerspective<{ all: Query }, Props>({
               }}
             />
           </label>
-          <button type="button" className="btn btn-sm btn-primary btn-square" title="New note" onClick={() => void create()}>
-            <Plus className="size-4" />
-          </button>
+          {onCreate && (
+            <button type="button" className="btn btn-sm btn-primary btn-square" title="New note" onClick={() => onCreate(prefill())}>
+              <Plus className="size-4" />
+            </button>
+          )}
         </div>
         {topTags.length > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -105,7 +110,7 @@ export const SearchSidebar = definePerspective<{ all: Query }, Props>({
           {result.notes.length} of {data.all.length} notes · <code>#tag</code> <code>gestalt:name@1</code> <code>-word</code>
         </p>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <NoteResultList notes={shown} terms={result.terms} active={active} marked={new Set(openKeys)} onOpen={onOpen} />
+          <NoteResultList notes={shown} terms={result.terms} active={active} marked={new Set(openKeys)} onOpen={onOpen} actions={actions} />
           {result.notes.length > limit && (
             <button type="button" className="btn btn-ghost btn-sm btn-block" onClick={() => setLimit(limit + PAGE)}>Show more</button>
           )}
