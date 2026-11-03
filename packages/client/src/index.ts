@@ -4,4 +4,7 @@ export { RepoProvider, useRepo, useRepoVersion, useQuery, useData, useNote, useB
 export * from './fields';
 export * as fold from './fold';
 export type { Card, Template, Part, Hashing, FoldWrites } from './fold';
+export { MODEL as FSRS_MODEL, Rating, fsrsStates, fsrsStateValue, getScheduler, review, stateFromNote, type Facet, type FsrsStates, type Grade, type ReviewState, type Scheduler } from './learning';
+export { IDLE_MS, SESSION_GAP_MS, PracticeSession, type SessionEvent } from './session';
+export { usePracticeSession, saveReview, type PracticeLog } from './practice';
 export type * from './types';

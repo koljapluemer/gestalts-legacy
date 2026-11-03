@@ -31,7 +31,7 @@ sam-learns-things has no migration yet.
 | `scene-object@1` | tag `scene-object`, `title` (its name), `props` (map), `hold` (map), blob `model` (glb) or `image` | tprboard objects, al-kutshina items |
 | `interaction@1` | tag `interaction`, `action`, `effects` (map: sender/receiver effect or reaction code, replacement image), one `actor` and at most one `target` relationship (scene objects), `instructions` (map: lang → list of accepted sentences) | tprboard relationships and task texts, al-kutshina capabilities, affordances and quests |
 | `practice-state@1` | tag `practice-state`, one `reviews` relationship, `model` (`ebisu`, `leitner-patience`, `streak`, `arabicnumbers-sr`, …), optional `facet`, `state` (map, as the model defines it) | every scheduler that isn't FSRS: tprboard (Ebisu), 20-words memorize board, triangle and simplify topic streaks, arabicnumbers levels |
-| `practice-session@1` | tag `practice-session`, `app` (perspective id), `started`, `ended` (datetime), `active_ms`, `trials`, `events` (list of maps, each with `at`; the app defines the rest); random key, written by one device only | the shared activity log and time entries, and every per-app event table: hebrewscript and minimal-pairs events (confusion matrices), typing line attempts, currency trials, world-map and triangle learning events, 20-words review events, with-videos snippet views and reflections, egyptiansentences highscores, FSRS review logs (py-fsrs kept them in the state file) |
+| `practice-session@1` | tag `practice-session`, `app` (perspective id), `started`, `ended` (datetime), `active_ms`, `trials`, `events` (list of maps, each with `at`; the app defines the rest); random key, written by one device only | the shared activity log and time entries, and every per-app event table: hebrewscript and minimal-pairs events (confusion matrices), typing line attempts, currency trials, world-map and triangle learning events, 20-words review events, with-videos snippet views and reflections, egyptiansentences highscores, FSRS review logs (`kind: fsrs-review`, see [gestalts.md](gestalts.md#learner-state); py-fsrs kept them in the state file) |
 | `settings@1` | tag `settings`, `scope` (perspective id); key `stableId("settings", scope)`; any further fields | synced preferences: target/native language, daily sentence goal, TELEX/VNI, Graph pins. Machine-specific settings (export paths, Ollama URL, the claude CLI) stay in the connector's config |
 | `renders` (key) | `{<kind>: {input_hash, blob, thumb}}` on the rendered note, written by a connector plugin (Chromium); `input_hash` covers the note's text, its blobs and the renderer's version | portfolio card collages, then visible on devices that can't render them (a phone); replaces dsl's `~/.cache/dsl-crud/cards` |
 | `viz` (key) | `{<name>: {version, built_from, meta, page, thumb, sources, previous}}` on the note holding the fence; `page`, `thumb`, `sources` (an archive of the project) are blobs | dsl viz blocks (`files/thea/`). The ```` ```thea brisk-river-3 ```` fence names its entry; a `thea@1` plugin service runs the claude CLI |
@@ -89,8 +89,9 @@ The cross-app stats page (trials, active time per day) aggregates `practice-sess
 ## Open questions
 
 - **Volume.** The decks hold thousands of notes each (minimal-pairs 4000 clips, hebrewscript 2250, saetze 1630,
-  egyptiansentences 1500; infinitesentences more), and `Repo` loads every note. Decks probably need to load per
-  perspective, i.e. a repo per deck layered under user space, instead of one global index.
+  egyptiansentences 1500; infinitesentences more), and they load into the one `Repo` index. What gets slow is I/O, not
+  memory: `Static` fetches each note separately, and sync rereads and reindexes every note. A deck bundled into one
+  file and incremental sync and reload would fix that.
 - **Blob sizes.** Audio decks are 50–150 MB. Copy-on-write only copies what was rated, which helps; offline use needs
   the "download the whole deck" action from [future.md](future.md).
 - **Migrating sam-learns-things** means exporting Dexie Cloud tables into state and session notes. Ids must map to

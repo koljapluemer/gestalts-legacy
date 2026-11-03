@@ -40,8 +40,7 @@ Foundations:
 - [x] Set merge for `relationships`, `blobs`, `tags` in `merge3`
 - [x] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
 - [x] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
-- [ ] A repo per deck, so big decks don't load into one index
-- [ ] Shared learning layer: FSRS by facet, `practice-session` writer (trials, active time), cross-app stats page
+- [x] Shared learning layer: FSRS by facet, `practice-session` writer (trials, active time)
 - [ ] Note parity with dsl: rendered `main`/`extra` with `[[links]]`, embeds, math and cards; backlinks widget;
   media attach and camera; `[[` completion
 
@@ -83,7 +82,7 @@ sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate t
 - Rendering `main` as Markdown in the Explorer, with `[[id]]` links and `![[blob]]` embeds (the canvas does already).
 - Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).
 - Undo for more than the last canvas removal; text ↔ note conversions are not undoable yet.
-- Learner activity and time statistics. The original sam-learns app had these; they weren't migrated.
+- Learner activity and time statistics. `practice-session@1` notes record trials and active time now, but no page shows them yet (sam-learns' own statistics weren't migrated).
 - Decks, beyond copy-on-write ([architecture.md](architecture.md#copy-on-write-from-a-deck)):
   - a "download the whole deck" action that copies everything up front, for offline use or archiving
   - a 3-way merge for diverged copies. It needs the deck text as copied, so either keep old deck releases or store a base snapshot next to the copies.

@@ -109,3 +109,19 @@ State notes (`fsrs-state@1`, `practice-state@1`) have stable keys, so two device
 `stateKey(gestalt, target, facet?)` in the client (`state_key` in the core), which is `stableId(gestalt, target)` or,
 for one facet of a note (a cloze level, a map exercise), `stableId(gestalt, "<target>/<facet>")`. States saved
 before this keep their random keys. Logs go in `practice-session@1` notes instead, one per session.
+
+Perspectives share this through `@gestalts/client` (`learning.ts`, `session.ts`, `practice.tsx`):
+- `fsrsStates(notes)` indexes `fsrs-state@1` notes by `{target, facet}`. Facets of a note are separate, and a state
+  without `facet` is the whole note's. If two notes hold the same one (a random key next to the stable one after a
+  sync), the later review wins, then more reps, then the greater key, so every device agrees.
+- `review(scheduler, prev, grade, now)` is plain FSRS. A perspective may adjust the result (Greek alphabet makes a card
+  due right away when it starts or stops struggling). `saveReview(repo, facet, prev, next, log)` writes it under the
+  existing key or `stateKey`, and logs the review.
+- `usePracticeSession(app)` writes this page's `practice-session@1` notes. A session starts at its first trial, so
+  opening a perspective writes nothing, and it includes the activity just before that trial. Any key or pointer press
+  while the page is visible counts as activity. A gap between two activities counts toward `active_ms` up to 60 s,
+  and time while hidden counts nothing. After 10 minutes without activity the next trial starts a new session.
+  `ended` is the last activity, updated on every write, so a closed tab still leaves a finished session.
+  `shown()` marks when a card appears; `trial(event)` appends `{at, ms, …event}`, `ms` being the time since `shown()`.
+- A review event is `{at, ms, kind: fsrs-review, target, facet?, rating}`. It replaces the review log py-fsrs kept in
+  its state file. Other apps add their own `kind`s.

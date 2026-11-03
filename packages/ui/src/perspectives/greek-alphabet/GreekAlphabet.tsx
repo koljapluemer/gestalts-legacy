@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { blob, stateKey, str, useBlobUrl, type IndexedNote, type Query } from '@gestalts/client';
+import { blob, fsrsStates, getScheduler, Rating, saveReview, str, useBlobUrl, usePracticeSession, type Grade, type IndexedNote, type Query } from '@gestalts/client';
 import { definePerspective } from '../define/definePerspective';
-import { getScheduler, isStruggling, nextCard, rate, Rating, stateFromNote, toNoteValue, type Grade, type ReviewState } from './schedule';
+import { facetOf, isStruggling, nextCard, rate } from './schedule';
 
 type Props = {
   /** which pronunciation cards to practise */
@@ -24,14 +24,8 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
     reviews: { gestalt: 'fsrs-state@1' },
   }),
   Component: ({ data, repo }) => {
-    const states = useMemo(() => {
-      const m = new Map<string, ReviewState>();
-      for (const n of data.reviews) {
-        const s = stateFromNote(n);
-        if (s) m.set(s.reviews, s.state);
-      }
-      return m;
-    }, [data.reviews]);
+    const states = useMemo(() => fsrsStates(data.reviews), [data.reviews]);
+    const log = usePracticeSession('greek-alphabet');
     const [current, setCurrent] = useState<{ id: string | null; last: string | null; picked: boolean }>({ id: null, last: null, picked: false });
 
     // first pick, once the cards are there
@@ -48,12 +42,10 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
     const onRate = async (grade: Grade) => {
       if (!card) return;
       const now = new Date();
-      const prev = states.get(card.id);
-      const next = rate(await getScheduler(), prev, grade, now);
-      // states saved before stable keys keep their random key
-      const key = prev?.key ?? stateKey('fsrs-state', card.id);
-      const saved = await repo.putValue(key, toNoteValue(key, card.id, next));
-      const updated = new Map(states).set(card.id, { ...next, key: saved.key });
+      const f = facetOf(card.id);
+      const prev = states.get(f);
+      const saved = await saveReview(repo, f, prev, rate(await getScheduler(), prev, grade, now), log);
+      const updated = states.with(f, saved);
       const following = nextCard(data.cards, updated, card.id, now);
       setCurrent({ id: following?.id ?? null, last: card.id, picked: true });
     };
@@ -72,12 +64,13 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
         </div>
       );
     }
-    return <PracticeCard key={card.key} card={card} struggling={isStruggling(states.get(card.id))} onRate={onRate} />;
+    return <PracticeCard key={card.key} card={card} struggling={isStruggling(states.get(facetOf(card.id)))} onShown={log.shown} onRate={onRate} />;
   },
 });
 
-function PracticeCard({ card, struggling, onRate }: { card: IndexedNote; struggling: boolean; onRate: (g: Grade) => Promise<void> }) {
+function PracticeCard({ card, struggling, onShown, onRate }: { card: IndexedNote; struggling: boolean; onShown: () => void; onRate: (g: Grade) => Promise<void> }) {
   const [revealed, setRevealed] = useState(false);
+  useEffect(onShown, [onShown]);
   const [busy, setBusy] = useState(false);
   const image = useBlobUrl(blob(card, 'image'));
   const audio = useBlobUrl(revealed ? blob(card, 'audio') : undefined);
