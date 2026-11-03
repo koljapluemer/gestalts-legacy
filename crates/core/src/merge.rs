@@ -4,6 +4,9 @@
 //! - one side changed (vs. the base): take it
 //! - both changed, both YAML maps: merge per top-level key; a key both sides changed differently
 //!   is a conflict, resolved local-first
+//! - except `relationships`, `blobs` and `tags`, merged as sets: an item either side added is kept, an item either side
+//!   removed is dropped, local order first, then remote additions. Items are compared whole, so a label changed
+//!   differently on both sides leaves both items.
 //! - both changed otherwise (unparseable, not maps, created on both sides without a base): local wins
 //! - a delete on one side and an edit on the other: the edit wins
 //!
@@ -54,18 +57,41 @@ fn merge_maps(base: &Mapping, local: &Mapping, remote: &Mapping) -> (Mapping, bo
     for k in keys.cloned().collect::<Vec<_>>() {
         let (b, l, r) = (base.get(&k), local.get(&k), remote.get(&k));
         let pick = if l == r || r == b {
-            l
+            l.cloned()
         } else if l == b {
-            r
+            r.cloned()
+        } else if let Some(v) = k.as_str().filter(|k| SET_KEYS.contains(k)).and_then(|_| set_merge(b, l, r)) {
+            v
         } else {
             conflicted = true;
-            l.or(r)
+            l.or(r).cloned()
         };
         if let Some(v) = pick {
-            out.insert(k, v.clone());
+            out.insert(k, v);
         }
     }
     (out, conflicted)
+}
+
+const SET_KEYS: [&str; 3] = ["relationships", "blobs", "tags"];
+
+/// Merges three lists as sets. `None` when a side isn't a list; `Some(None)` drops the key.
+fn set_merge(base: Option<&Value>, local: Option<&Value>, remote: Option<&Value>) -> Option<Option<Value>> {
+    fn items(v: Option<&Value>) -> Option<&[Value]> {
+        match v {
+            None | Some(Value::Null) => Some(&[]),
+            Some(Value::Sequence(s)) => Some(s),
+            Some(_) => None,
+        }
+    }
+    let (b, l, r) = (items(base)?, items(local)?, items(remote)?);
+    let mut out: Vec<Value> = l.iter().filter(|i| !b.contains(i) || r.contains(i)).cloned().collect();
+    for i in r {
+        if !b.contains(i) && !out.contains(i) {
+            out.push(i.clone());
+        }
+    }
+    Some((local.is_some() || !out.is_empty()).then_some(Value::Sequence(out)))
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -194,6 +220,53 @@ mod tests {
     }
 
     #[test]
+    fn set_keys_merge_as_sets() {
+        // both add: local order, then remote additions
+        let r = m(Some("relationships: [a]\n"), Some("relationships: [a, b]\n"), Some("relationships: [a, c]\n"));
+        assert_eq!(r.text.as_deref(), Some("relationships:\n- a\n- b\n- c\n"));
+        assert_eq!(r.conflict, None);
+        // one removes, the other adds
+        let r = m(Some("tags: [x, y]\n"), Some("tags: [y]\n"), Some("tags: [x, y, z]\n"));
+        assert_eq!(r.text.as_deref(), Some("tags:\n- y\n- z\n"));
+        // both add the same item, and remote removes what local kept
+        let r = m(Some("tags: [x]\n"), Some("tags: [x, n]\n"), Some("tags: [n]\n"));
+        assert_eq!(r.text.as_deref(), Some("tags:\n- n\n"));
+        // labelled items compare whole
+        let r = m(
+            Some("blobs: [{file: a.webp, label: x}]\n"),
+            Some("blobs: [{file: a.webp, label: y}]\n"),
+            Some("blobs: [{file: a.webp, label: x}, b.webp]\n"),
+        );
+        assert_eq!(r.text.as_deref(), Some("blobs:\n- file: a.webp\n  label: y\n- b.webp\n"));
+        assert_eq!(r.conflict, None);
+    }
+
+    #[test]
+    fn set_keys_missing_or_not_lists() {
+        // no base key, both add
+        let r = m(Some("a: 1\n"), Some("a: 1\ntags: [x]\n"), Some("a: 1\ntags: [y]\n"));
+        assert_eq!(r.text.as_deref(), Some("a: 1\ntags:\n- x\n- y\n"));
+        // local dropped the key, remote added to it
+        let r = m(Some("tags: [x]\n"), Some("{}\n"), Some("tags: [x, y]\n"));
+        assert_eq!(r.text.as_deref(), Some("tags:\n- y\n"));
+        // local dropped the key, remote removed the rest: stays dropped
+        let r = m(Some("a: 1\ntags: [x, y]\n"), Some("a: 1\n"), Some("a: 1\ntags: [x]\n"));
+        assert_eq!(r.text.as_deref(), Some("a: 1\n"));
+        assert_eq!(r.conflict, None);
+        // not a list: a conflict as before
+        let r = m(Some("tags: [x]\n"), Some("tags: foo\n"), Some("tags: [x, y]\n"));
+        assert_eq!(r.text.as_deref(), Some("tags: foo\n"));
+        assert!(r.conflict.is_some());
+    }
+
+    #[test]
+    fn set_key_merges_beside_a_conflict() {
+        let r = m(Some("a: 1\ntags: [x]\n"), Some("a: 2\ntags: [x, l]\n"), Some("a: 3\ntags: [x, r]\n"));
+        assert_eq!(r.text.as_deref(), Some("a: 2\ntags:\n- x\n- l\n- r\n"));
+        assert_eq!(r.conflict.as_deref(), Some("a: 3\ntags: [x, r]\n"));
+    }
+
+    #[test]
     fn sync_converges() {
         pollster::block_on(async {
             let (l, r, b) = (Memory::default(), Memory::default(), Memory::default());
@@ -224,8 +297,19 @@ mod tests {
             assert_eq!(r.read_note("only-local").await.unwrap().as_deref(), Some("x: 3"));
             assert_eq!(l.read_note("only-local.conflict-t3").await.unwrap().as_deref(), Some("x: 4"));
 
+            // both add a relationship: merged, no conflict note
+            l.write_note("rel", "relationships: [a]").await.unwrap();
+            sync(&l, &r, &b, "t4").await.unwrap();
+            l.write_note("rel", "relationships: [a, b]").await.unwrap();
+            r.write_note("rel", "relationships: [a, {to: c, label: on-canvas}]").await.unwrap();
+            let rep = sync(&l, &r, &b, "t5").await.unwrap();
+            assert!(rep.conflicts.is_empty());
+            let merged = "relationships:\n- a\n- b\n- to: c\n  label: on-canvas\n";
+            assert_eq!(l.read_note("rel").await.unwrap().as_deref(), Some(merged));
+            assert_eq!(r.read_note("rel").await.unwrap().as_deref(), Some(merged));
+
             // nothing changed: a no-op
-            let rep = sync(&l, &r, &b, "t4").await.unwrap();
+            let rep = sync(&l, &r, &b, "t6").await.unwrap();
             assert!(rep.pulled.is_empty() && rep.pushed.is_empty() && rep.conflicts.is_empty());
         });
     }

@@ -97,6 +97,7 @@ Each side is compared with a **base**: the state after the last sync, stored in 
 
 - Only one side changed since the base: take that side, including deletes.
 - Both sides changed, and both are YAML maps: merge per top-level key. A key changed on both sides is a conflict, and the local version wins.
+  - Except `relationships`, `blobs` and `tags`, merged as sets: an item either side added is kept, an item either side removed is dropped. Local order comes first, then remote additions. Items are compared whole, so a label changed differently on both sides leaves both items.
 - Both sides changed in some other way (unparseable, not maps, or created on both sides): the local version wins, and it counts as a conflict.
 - One side deleted and the other edited: the edit wins.
 

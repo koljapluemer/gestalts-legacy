@@ -5,13 +5,11 @@ The gestalts planned for bringing in dsl and sam-learns-things: [integration-ges
 ## Fewer attached notes
 
 A separate note is for something with its own writer or identity. A note's own canvas, template, cards or renders are
-parts of that note and should be keys on it. Merge is per top-level key, so a `canvas` key never conflicts with `main`.
-What forces the split today is that `relationships` and `blobs` are each one key: a canvas save adding an `on-canvas`
-relationship conflicts with a relationship edited on another device.
+parts of that note and should be keys on it. Merge is per top-level key, so a `canvas` key never conflicts with `main`,
+and `relationships`, `blobs` and `tags` merge as sets ([connector.md](connector.md)), so a canvas save adding an
+`on-canvas` relationship no longer conflicts with a relationship edited on another device.
 
-1. **Set merge** in `merge3` for `relationships`, `blobs` and `tags`: an item either side added is kept, an item
-   either side removed is dropped. Order follows local, with remote additions appended.
-2. **Fold into the host**, each as a new gestalt version found by its key (`trigger_fields`), so old notes stay readable:
+1. **Fold into the host**, each as a new gestalt version found by its key (`trigger_fields`), so old notes stay readable:
    - `canvas@2`: a `canvas: {nodes}` key; `on-canvas` relationships on the host.
    - `template@2`: a `template: {format, source}` key on the note it renders (`_index`, the portfolio).
    - `cards`: a list of `{front, back}` on the host, replacing `flashcard@1` notes with `card-of`. A card's review
@@ -19,7 +17,7 @@ relationship conflicts with a relationship edited on another device.
      a card (just-flashcards) stays `flashcard@1`.
    - Worker output (card collages, viz builds) as keys the worker owns: `renders`, `viz`. Their blobs are also listed
      in `blobs`, labelled, so copy-on-write carries them.
-3. **Migrate in place, lazily.** The dsl migration has run, and its `canvas@1`, `template@1` and `card-of`
+2. **Migrate in place, lazily.** The dsl migration has run, and its `canvas@1`, `template@1` and `card-of`
    `flashcard@1` notes are in use and syncing between devices. There's no bulk rewrite. Perspectives read both forms,
    the host's key first. The first write through the new form folds the attached note into the host and tags the
    old note `retired`. It isn't deleted, since sync lets an edit beat a delete. If another device edits the old note
@@ -37,7 +35,7 @@ Separate notes stay where they have their own writer or identity:
 One plan session each, in this order. Each ends with a visual check in the app and `doc/` updated.
 
 Foundations:
-- [ ] Set merge for `relationships`, `blobs`, `tags` in `merge3`
+- [x] Set merge for `relationships`, `blobs`, `tags` in `merge3`
 - [ ] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
 - [ ] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
 - [ ] A repo per deck, so big decks don't load into one index
