@@ -2,6 +2,7 @@ import init, {
   WasmRepo, cardId as wasmCardId, contentHash as wasmContentHash, merge3 as wasmMerge3, newId as wasmNewId, stableId as wasmStableId,
   stateKey as wasmStateKey,
 } from '../wasm/gestalts.js';
+import { coalesce } from './coalesce';
 import { logger } from './log';
 import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
 
@@ -222,7 +223,13 @@ export class Repo {
     this.setStatus({ url: null, state: 'off', error: undefined });
   }
 
-  async sync(): Promise<SyncReport | undefined> {
+  /**
+   * Syncs now, or, if a sync is running, once more after it; with one already waiting, joins that one. So syncs never
+   * pile up in the write queue (each would make the writes after it wait).
+   */
+  sync = coalesce(() => this.runSync(), () => log.debug('sync: coalesced'));
+
+  private async runSync(): Promise<SyncReport | undefined> {
     const url = this.status.url;
     if (!url) return;
     this.setStatus({ state: 'syncing' });
@@ -230,9 +237,13 @@ export class Repo {
       const tag = new Date().toISOString().replace(/[:.]/g, '-');
       const report = await this.serial('sync', () => this.wasm.sync(url, tag) as Promise<SyncReport>);
       if (this.status.url !== url) return report;
-      log.info('sync done', { pushed: report.pushed.length, pulled: report.pulled.length, blobsPulled: report.blobs_pulled.length, conflicts: report.conflicts.length });
+      log.info('sync done', {
+        pushed: report.pushed.length, pulled: report.pulled.length, blobsPulled: report.blobs_pulled.length, conflicts: report.conflicts.length,
+        notes: report.notes, timings: report.timings,
+      });
       this.setStatus({ state: 'ok', lastSync: new Date(), lastReport: report, folder: report.folder, conflicts: [...this.status.conflicts, ...report.conflicts] });
-      if (report.pulled.length || report.blobs_pulled.length) {
+      const up = this.upstreamReport();
+      if (report.pulled.length || report.blobs_pulled.length || report.conflicts.length || up.copied.length || up.updated.length) {
         report.blobs_pulled.forEach((b) => this.blobUrls.delete(b));
         this.changed();
       }

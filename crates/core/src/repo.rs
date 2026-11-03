@@ -84,6 +84,23 @@ impl<S: Storage> Repo<S> {
         Ok(())
     }
 
+    /// Rereads just `keys` from storage (after something wrote them behind the repo's back, like a sync);
+    /// a key no longer in storage leaves the index.
+    pub async fn reindex(&self, keys: &[String]) -> Result<()> {
+        for key in keys {
+            match self.storage.read_note(key).await? {
+                Some(raw) => {
+                    let n = IndexedNote::new(Note::parse(key, raw), &self.gestalts);
+                    self.index.borrow_mut().insert(key.clone(), n);
+                }
+                None => {
+                    self.index.borrow_mut().remove(key);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn get(&self, key: &str) -> Option<IndexedNote> {
         self.index.borrow().get(key).cloned()
     }
@@ -193,6 +210,28 @@ mod tests {
             assert_eq!(repo.key_of(&n.id), Some(n.note.key.clone()));
             repo.delete(&n.note.key).await.unwrap();
             assert!(repo.get(&n.note.key).is_none());
+        });
+    }
+
+    #[test]
+    fn reindex_reads_only_the_given_keys() {
+        pollster::block_on(async {
+            let repo = Repo::new(Memory::default(), Gestalts::builtin());
+            repo.storage().write_note("a", "title: a").await.unwrap();
+            repo.storage().write_note("b", "title: b").await.unwrap();
+            repo.load().await.unwrap();
+
+            // written behind the repo's back, as a sync does
+            repo.storage().write_note("a", "tags: [flashcard]\nfront: x\nback: y\n").await.unwrap();
+            repo.storage().delete_note("b").await.unwrap();
+            repo.storage().write_note("c", "title: c").await.unwrap();
+            repo.storage().write_note("d", "title: d").await.unwrap();
+            repo.reindex(&["a".into(), "b".into(), "c".into()]).await.unwrap();
+
+            assert_eq!(repo.get("a").unwrap().gestalts, vec!["flashcard@1"]);
+            assert!(repo.get("b").is_none());
+            assert!(repo.get("c").is_some());
+            assert!(repo.get("d").is_none(), "not asked for");
         });
     }
 

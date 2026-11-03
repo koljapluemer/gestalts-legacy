@@ -138,7 +138,9 @@ The Learn pane (`perspectives/learn`) reviews every flashcard by FSRS, as dsl's 
 `pickNext` shows a random due card, else a random new one, never the one just rated unless it's the only one; the
 card shown stays until it's rated, even if a sync changes the picks. The front, then Reveal (Space), then front and
 back with Again, Hard, Good, Easy (1–4); the counts are due · new · all. Reviews go through `saveReview` and the
-`learn` practice session. A card that's deleted leaves its `fsrs-state` note behind: nothing reads it, and deleting
+`learn` practice session. A rating shows the next card at once: `useLocalReviews` lays the new state over the
+query's until the query has it, and the save runs in the background (it may wait behind a sync); if it fails, an
+alert says so. The Greek alphabet works the same way. A card that's deleted leaves its `fsrs-state` note behind: nothing reads it, and deleting
 it would lose against sync, where an edit beats a delete.
 
 ## Search sidebar

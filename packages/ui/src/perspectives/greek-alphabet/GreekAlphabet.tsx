@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { blob, fsrsStates, getScheduler, logger, Rating, saveReview, str, useBlobUrl, usePracticeSession, type Grade, type IndexedNote, type Query } from '@gestalts/client';
+import { blob, fsrsStates, getScheduler, logger, Rating, saveReview, stateKey, str, useBlobUrl, useLocalReviews, usePracticeSession, type Grade, type IndexedNote, type Query } from '@gestalts/client';
 import { definePerspective } from '../define/definePerspective';
 import { facetOf, isStruggling, nextCard, rate } from './schedule';
 
@@ -26,7 +26,10 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
     reviews: { gestalt: 'fsrs-state@1' },
   }),
   Component: ({ data, repo }) => {
-    const states = useMemo(() => fsrsStates(data.reviews), [data.reviews]);
+    const stored = useMemo(() => fsrsStates(data.reviews), [data.reviews]);
+    // reviews made here count at once; their saves run in the background (and may wait behind a sync)
+    const { states, put } = useLocalReviews(stored);
+    const [saveError, setSaveError] = useState<string | null>(null);
     const log = usePracticeSession('greek-alphabet');
     const [current, setCurrent] = useState<{ id: string | null; last: string | null; picked: boolean }>({ id: null, last: null, picked: false });
 
@@ -47,18 +50,31 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
       const f = facetOf(card.id);
       const prev = states.get(f);
       glog.info('rate', { id: card.id, grade, prevDue: prev?.card.dueAt ?? null });
-      const saved = await saveReview(repo, f, prev, rate(await getScheduler(), prev, grade, now), log);
-      const updated = states.with(f, saved);
-      const following = nextCard(data.cards, updated, card.id, now);
-      glog.info('rated', { id: card.id, nextDue: saved.card.dueAt, next: following?.id ?? null });
+      const next = { ...rate(await getScheduler(), prev, grade, now), key: prev?.key ?? stateKey('fsrs-state', f.target, f.facet) };
+      put(f, next);
+      // records the trial before the next card is shown
+      const saving = saveReview(repo, f, prev, next, log);
+      const following = nextCard(data.cards, states.with(f, next), card.id, now);
       setCurrent({ id: following?.id ?? null, last: card.id, picked: true });
+      saving.then(
+        () => glog.info('rated', { id: card.id, nextDue: next.card.dueAt, next: following?.id ?? null }),
+        (e: unknown) => setSaveError(e instanceof Error ? e.message : String(e)),
+      );
     };
+
+    const alert = saveError && (
+      <div role="alert" className="alert alert-error m-4 text-sm">
+        <span>Couldn't save your last answer: {saveError}</span>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSaveError(null)}>Dismiss</button>
+      </div>
+    );
 
     if (!data.cards.length) return <p className="p-8 text-center text-base-content/60">No pronunciation cards here yet.</p>;
     if (!current.picked) return <div className="flex justify-center p-8"><span className="loading loading-spinner" /></div>;
     if (!card) {
       return (
         <div className="flex flex-col items-center gap-3 p-8 text-center">
+          {alert}
           <p className="text-lg font-semibold">All caught up.</p>
           <p className="text-base-content/60">Nothing due right now.</p>
           <button type="button" className="btn btn-sm" onClick={() => {
@@ -68,7 +84,7 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
         </div>
       );
     }
-    return <PracticeCard key={card.key} card={card} struggling={isStruggling(states.get(facetOf(card.id)))} onShown={log.shown} onRate={onRate} />;
+    return <>{alert}<PracticeCard key={card.key} card={card} struggling={isStruggling(states.get(facetOf(card.id)))} onShown={log.shown} onRate={onRate} /></>;
   },
 });
 

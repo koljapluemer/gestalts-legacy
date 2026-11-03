@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fsrsStates, fsrsStateValue, getScheduler, Rating, review, stateFromNote } from './learning';
+import { fsrsStates, fsrsStateValue, getScheduler, isAhead, Rating, review, stateFromNote, withLocal, type ReviewState } from './learning';
 import type { IndexedNote, Json } from './types';
 
 function stateNote(key: string, target: string, opts: { facet?: string; lastReviewAt?: string; reps?: number; dueAt?: string } = {}): IndexedNote {
@@ -75,5 +75,24 @@ describe('fsrsStateValue', () => {
       id: 'k', tags: ['fsrs-state'], relationships: [{ to: 'a', label: 'reviews' }], model: 'FSRS-7', last_rating: 2, card: s.card,
     });
     expect(fsrsStateValue('k', { target: 'a', facet: 'f' }, s)).toMatchObject({ facet: 'f' });
+  });
+});
+
+describe('withLocal', () => {
+  const at = (iso: string, reps = 1): ReviewState => ({ lastRating: Rating.Good, card: { dueAt: '2026-12-01T00:00:00Z', lastReviewAt: iso, reps } });
+  const f = { target: 't', facet: 'c' };
+
+  it('lays a local review over a missing or older stored one, not over the same or a newer one', () => {
+    const empty = fsrsStates([]);
+    const local = { facet: f, state: at('2026-11-03T12:00:00Z') };
+    expect(withLocal(empty, [local]).get(f)).toBe(local.state);
+
+    const older = empty.with(f, at('2026-11-02T12:00:00Z'));
+    expect(isAhead(older, local)).toBe(true);
+    expect(withLocal(older, [local]).get(f)).toBe(local.state);
+
+    const caughtUp = empty.with(f, at('2026-11-03T12:00:00Z'));
+    expect(isAhead(caughtUp, local)).toBe(false);
+    expect(withLocal(caughtUp, [local]).get(f)).toBe(caughtUp.get(f));
   });
 });

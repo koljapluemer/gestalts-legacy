@@ -147,8 +147,17 @@ impl WasmRepo {
     /// Syncs this repo's writable notes and blobs with a connector, then reloads. `tag` names conflict notes.
     /// Returns the sync report plus `folder`, the path of the connector's open folder.
     pub async fn sync(&self, connector_url: String, tag: String) -> Result<JsValue, JsError> {
+        // ms per step, for the debug log
+        let mut timings = serde_json::Map::new();
+        let mut last = js_sys::Date::now();
+        let mut mark = |name: &str| {
+            let now = js_sys::Date::now();
+            timings.insert(name.to_owned(), ((now - last).round() as i64).into());
+            last = now;
+        };
         let remote = Connector::new(&connector_url);
         let health = remote.health().await.map_err(err)?;
+        mark("health");
         let folder = &health["folder"];
         let (Some(folder_id), Some(folder_path)) = (folder["id"].as_str(), folder["path"].as_str()) else {
             return Err(JsError::new("The connector has no folder open yet. Choose one in the Gestalts Connector."));
@@ -157,12 +166,22 @@ impl WasmRepo {
         // comparing against another folder's base would read its missing notes as deletions
         let slug: String = format!("{connector_url}#{folder_id}").chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let base = Opfs::open(&format!("{}-sync-base/{slug}", self.dir)).await.map_err(err)?;
-        let report = gestalts_core::sync(&*self.writable, &remote, &base, &tag).await.map_err(err)?;
+        mark("open_base");
+        let report = gestalts_core::sync_with(&*self.writable, &remote, &base, &tag, &mut mark).await.map_err(err)?;
         self.pull_upstream().await?;
+        mark("pull_upstream");
+        // only what sync and pull_upstream wrote: the repo's own writes are indexed already
+        let mut changed: Vec<String> = report.pulled.iter().chain(&report.conflicts).cloned().collect();
+        {
+            let up = self.upstream_report.borrow();
+            changed.extend(up.copied.iter().chain(&up.updated).cloned());
+        }
         let repo = self.repo.clone();
-        repo.load().await.map_err(err)?;
+        repo.reindex(&changed).await.map_err(err)?;
+        mark("reindex");
         let mut out = serde_json::to_value(&report).map_err(|e| JsError::new(&e.to_string()))?;
         out["folder"] = folder_path.into();
+        out["timings"] = timings.into();
         to_js(&out)
     }
 }

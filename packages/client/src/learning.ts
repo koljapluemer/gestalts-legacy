@@ -85,6 +85,20 @@ export function fsrsStates(notes: IndexedNote[]): FsrsStates {
   return makeStates(m);
 }
 
+/** A review made here and not yet (known to be) saved. */
+export type LocalReview = { facet: Facet; state: ReviewState };
+
+/** Whether `stored` still lacks `r`: it has no state for the facet, or an older one. */
+export function isAhead(stored: FsrsStates, r: LocalReview): boolean {
+  const s = stored.get(r.facet);
+  return !s || newer(r.state, s);
+}
+
+/** `stored` with the `local` reviews laid over it, where they're ahead of it. */
+export function withLocal(stored: FsrsStates, local: LocalReview[]): FsrsStates {
+  return local.reduce((states, r) => (isAhead(stored, r) ? states.with(r.facet, r.state) : states), stored);
+}
+
 function toSchedulerCard(stored: ReviewState['card']): SchedulerCard {
   const lastReviewAt = stored.lastReviewAt;
   return { ...stored, dueAt: new Date(stored.dueAt), lastReviewAt: typeof lastReviewAt === 'string' ? new Date(lastReviewAt) : null } as unknown as SchedulerCard;

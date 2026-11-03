@@ -12,6 +12,8 @@
 //!
 //! On a conflict the remote text is kept as a separate note `<key>.conflict-<tag>`.
 
+use std::collections::{BTreeSet, HashMap};
+
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 
@@ -104,31 +106,53 @@ pub struct SyncReport {
     pub conflicts: Vec<String>,
     pub blobs_pulled: Vec<String>,
     pub blobs_pushed: Vec<String>,
+    /// how many notes each side had before the sync
+    pub notes: NoteCounts,
 }
+
+#[derive(Debug, Default, Serialize)]
+pub struct NoteCounts {
+    pub local: usize,
+    pub remote: usize,
+    pub base: usize,
+}
+
+/// The steps `sync_with` reports as it finishes them, in order.
+pub const SYNC_STEPS: [&str; 5] = ["read_local", "read_remote", "read_base", "merge_notes", "blobs"];
 
 /// Syncs `local` and `remote` against `base`, the state both had after the last sync.
 /// Afterwards all three hold the same notes. Blobs are only ever added, never merged or deleted.
 /// `tag` names conflict notes and should be unique per sync, e.g. a timestamp.
 pub async fn sync(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage, tag: &str) -> Result<SyncReport> {
+    sync_with(local, remote, base, tag, &mut |_| {}).await
+}
+
+/// `sync`, calling `step` with each of `SYNC_STEPS` as it's done (to time them; the core has no clock).
+pub async fn sync_with(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage, tag: &str, step: &mut dyn FnMut(&str)) -> Result<SyncReport> {
     let mut report = SyncReport::default();
-    let (l, r, b) = (local.read_all_notes().await?, remote.read_all_notes().await?, base.read_all_notes().await?);
-    let get = |set: &[(String, String)], k: &str| set.iter().find(|(key, _)| key == k).map(|(_, t)| t.clone());
-    let mut keys: Vec<&String> = l.iter().chain(&r).chain(&b).map(|(k, _)| k).collect();
-    keys.sort();
-    keys.dedup();
+    let all = |v: Vec<(String, String)>| v.into_iter().collect::<HashMap<_, _>>();
+    let l = all(local.read_all_notes().await?);
+    step("read_local");
+    let r = all(remote.read_all_notes().await?);
+    step("read_remote");
+    let b = all(base.read_all_notes().await?);
+    step("read_base");
+    report.notes = NoteCounts { local: l.len(), remote: r.len(), base: b.len() };
+    // sorted, so the report lists keys in order
+    let keys: BTreeSet<&str> = l.keys().chain(r.keys()).chain(b.keys()).map(String::as_str).collect();
 
     for key in keys {
-        let (lt, rt, bt) = (get(&l, key), get(&r, key), get(&b, key));
-        let m = merge3(bt.as_deref(), lt.as_deref(), rt.as_deref());
-        if m.text != lt {
+        let (lt, rt, bt) = (l.get(key).map(String::as_str), r.get(key).map(String::as_str), b.get(key).map(String::as_str));
+        let m = merge3(bt, lt, rt);
+        if m.text.as_deref() != lt {
             put(local, key, m.text.as_deref()).await?;
-            report.pulled.push(key.clone());
+            report.pulled.push(key.to_owned());
         }
-        if m.text != rt {
+        if m.text.as_deref() != rt {
             put(remote, key, m.text.as_deref()).await?;
-            report.pushed.push(key.clone());
+            report.pushed.push(key.to_owned());
         }
-        if m.text != bt {
+        if m.text.as_deref() != bt {
             put(base, key, m.text.as_deref()).await?;
         }
         if let Some(c) = m.conflict {
@@ -139,6 +163,8 @@ pub async fn sync(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage,
             report.conflicts.push(ck);
         }
     }
+
+    step("merge_notes");
 
     let (lb, rb) = (local.list_blobs().await?, remote.list_blobs().await?);
     for name in rb.iter().filter(|n| !lb.contains(n)) {
@@ -153,6 +179,7 @@ pub async fn sync(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage,
             report.blobs_pushed.push(name.clone());
         }
     }
+    step("blobs");
     Ok(report)
 }
 

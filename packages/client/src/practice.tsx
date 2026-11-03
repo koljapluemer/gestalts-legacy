@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRepo } from './react';
 import { newId, stateKey, type Repo } from './repo';
-import { fsrsStateValue, type Facet, type ReviewState } from './learning';
+import { fsrsStateValue, isAhead, withLocal, type Facet, type FsrsStates, type LocalReview, type ReviewState } from './learning';
 import { PracticeSession, type SessionEvent } from './session';
 import { logger } from './log';
 
@@ -53,15 +53,37 @@ export function usePracticeSession(app: string): PracticeLog {
 }
 
 /**
+ * The FSRS states to practice with: `stored` (from the query) with the reviews made here laid over it until the
+ * query has them. So the next card can be picked at once, while the save runs in the background (or waits behind a
+ * sync). `put` adds a review.
+ */
+export function useLocalReviews(stored: FsrsStates): { states: FsrsStates; put: (facet: Facet, state: ReviewState) => void } {
+  const [local, setLocal] = useState<LocalReview[]>([]);
+  const states = useMemo(() => withLocal(stored, local), [stored, local]);
+  const put = useCallback((facet: Facet, state: ReviewState) => {
+    const slot = (f: Facet) => `${f.target}\u0000${f.facet ?? ''}`;
+    // also drops the ones the query has caught up with
+    setLocal((l) => [...l.filter((r) => slot(r.facet) !== slot(facet) && isAhead(stored, r)), { facet, state }]);
+  }, [stored]);
+  return { states, put };
+}
+
+/**
  * Saves `next` as the FSRS state of `f` (under `prev`'s key if it has one, else `stateKey`) and, with a `log`,
  * records an `fsrs-review` trial. Returns `next` with its saved key.
+ *
+ * The trial is recorded synchronously, before the first await: its `ms` counts from when this card was shown, so it
+ * must be taken before the next card is.
  */
 export async function saveReview(repo: Repo, f: Facet, prev: ReviewState | undefined, next: ReviewState, log?: PracticeLog): Promise<ReviewState> {
   const key = prev?.key ?? stateKey('fsrs-state', f.target, f.facet);
   const span = plog.span('saveReview', { target: f.target, facet: f.facet, key, rating: next.lastRating, dueAt: next.card.dueAt });
+  const trial = log?.trial({ kind: 'fsrs-review', target: f.target, ...(f.facet ? { facet: f.facet } : {}), rating: next.lastRating });
+  // handled where it's awaited below; this keeps a failure meanwhile from counting as unhandled
+  trial?.catch(() => {});
   try {
     const saved = await repo.putValue(key, fsrsStateValue(key, f, next));
-    await log?.trial({ kind: 'fsrs-review', target: f.target, ...(f.facet ? { facet: f.facet } : {}), rating: next.lastRating });
+    await trial;
     span.end();
     return { ...next, key: saved.key };
   } catch (e) {

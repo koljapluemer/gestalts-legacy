@@ -57,6 +57,10 @@ export type SyncReport = {
   blobs_pushed: string[];
   /** the connector's open folder */
   folder: string;
+  /** how many notes each side had: local, remote, base */
+  notes?: { local: number; remote: number; base: number };
+  /** ms per step of the sync, for the debug log */
+  timings?: Record<string, number>;
 };
 
 /** What checking a layered repo against its upstream did, by note key. */

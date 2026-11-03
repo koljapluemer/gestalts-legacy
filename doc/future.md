@@ -75,6 +75,7 @@ sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate t
 - **Android connector**: the same `Storage` port over Android storage. The core has no desktop-only dependencies.
 - **Obsidian two-way sync**: likely a converter between Markdown with frontmatter and notes, plus the existing `sync`.
 - **Browser plugin** (e.g. vocabulary from Duolingo): it would write through the connector API.
+- **Cheaper sync.** Each sync still reads every local, remote and base note, and Firefox OPFS is slow per file ([bug 2072928](https://bugzilla.mozilla.org/show_bug.cgi?id=2072928)). Next, guided by the step timings in the debug log: track which keys changed locally since the last sync, have the connector list `{key: hash}` so only differing notes are fetched, keep a manifest of agreed hashes instead of a full base copy, and release the write queue during network time. If per-file OPFS cost still dominates: the core in a Worker with sync access handles, or notes stored in one OPFS file.
 - Modification times in the `Storage` port, which the search would need for a "recent" list.
 - Authentication for the connector (a token per app).
 - Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).

@@ -93,6 +93,8 @@ The apps sync their writable OPFS notes with the folder at these times:
 - 0.8 s after each write
 - every 15 s
 
+At most one sync runs, and at most one more waits (`coalesce`, `packages/client/src/coalesce.ts`): requests while one is already waiting join it. Syncs and writes share one queue, so piled-up syncs would make every write wait. After a sync only the notes it wrote locally (pulled, conflict notes, upstream copies) are re-read into the index. The debug log's `sync done` lists the note counts and how long each step took.
+
 Each side is compared with a **base**: the state after the last sync, stored in OPFS per connector URL and folder id. Each note is then merged:
 
 - Only one side changed since the base: take that side, including deletes.

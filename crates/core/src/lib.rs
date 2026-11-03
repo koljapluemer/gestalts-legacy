@@ -10,7 +10,7 @@ pub mod storage;
 pub mod upstream;
 
 pub use gestalt::{GestaltDef, Gestalts, Lint, card_id};
-pub use merge::{SyncReport, merge3, sync};
+pub use merge::{NoteCounts, SYNC_STEPS, SyncReport, merge3, sync, sync_with};
 pub use note::{Note, ParseError, Ref};
 pub use repo::{IndexedNote, Query, Repo, new_id, stable_id, state_key};
 pub use storage::{Layered, Memory, Storage, StorageError};
