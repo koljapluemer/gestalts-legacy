@@ -47,7 +47,7 @@ become plain deck notes (title, explanation in `main`), so `practice-state@1` ha
   cards (sam-learns) means converting them to the v6 card.
 - `pronunciation-card@1` already fits hebrewscript and minimal-pairs clips (`title` the transcript, blob `audio`,
   `lang`); minimal-pairs' `nativeScript` goes in `aliases`.
-- `flashcard@1` covers just-flashcards as is; cards in other notes become a `cards` key ([future.md](future.md#fewer-attached-notes)).
+- `flashcard@1` covers just-flashcards as is; cards in other notes are a `cards` key (`cards@1`, each with an `id` for its `facet`; [gestalts.md](gestalts.md#folded-parts)).
 - [data-format.md](data-format.md) has two conventional fields that dsl notes already carry after migration: `extra`
   (more Markdown, inline references count as in `main`) and `tasks` (a note about the note, for the Tasks tab).
 
@@ -56,7 +56,7 @@ become plain deck notes (title, explanation in `main`), so `practice-state@1` ha
 | tab | built on |
 |---|---|
 | Daily, Calendar, Projects, Sources, Canvas, Canvas2Typ, Published + site | existing gestalts (`daily`, `appointment`, `recurring`, `project`, `issue`, `source`, `typst-document`, `published`), `canvas@2` and `template@2` keys on the host |
-| Learn | `cards` key (and `flashcard@1`) + `fsrs-state@1` with `facet`, review logs in `practice-session@1` |
+| Learn | `cards@1` key (and `flashcard@1`) + `fsrs-state@1` with `facet`, review logs in `practice-session@1` |
 | Portfolio | tag `portfolio` + `template@2`, tag `card` notes with `renders` |
 | Graph | relationships; pins in `settings@1`; hiding by tags `no-graph` |
 | Viz blocks | `viz` key |

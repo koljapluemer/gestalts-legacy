@@ -2,7 +2,7 @@ import type { Json } from '@gestalts/client';
 
 /**
  * A canvas as the page holds it: nodes in z-order, each free Markdown text or a linked note (its id), at a flow
- * position (the node's top left). Stored as `nodes` of a `canvas@1` note.
+ * position (the node's top left). Stored as `canvas.nodes` on the note it's about (`canvas@2`).
  */
 export type CanvasNode = { id: string; x: number; y: number } & ({ kind: 'text'; text: string } | { kind: 'note'; note: string });
 export type CanvasDoc = { readonly nodes: readonly CanvasNode[] };

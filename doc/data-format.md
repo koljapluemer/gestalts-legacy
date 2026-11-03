@@ -21,6 +21,8 @@ A note is any YAML. Conventions, all optional:
 | `relationships` | list of `<uuid>` or `{to: <uuid>, label: <label>}` |
 | `blobs` | list of `<file>` or `{file: <file>, label: <label>}` |
 | `upstream` | where a copied note came from, see [Published decks](#published-decks) |
+| `canvas`, `template`, `cards` | the note's own canvas, template and flashcards ([gestalts.md](gestalts.md#folded-parts)) |
+| `folded` | on a retired note whose content moved into another note: `{into, hash}` ([gestalts.md](gestalts.md#folded-parts)) |
 
 How the core copes with missing or broken pieces:
 - A note without an `id` is addressed by its key, the file name without `.yml`.

@@ -4,11 +4,11 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ExternalLink, FilePlus2, GripVertical, Maximize, Pencil, Plus, RotateCcw, StickyNote, Trash2, Type, Undo2, Unlink } from 'lucide-react';
-import { noteLabel, str, useNote, type IndexedNote, type Query, type Repo } from '@gestalts/client';
+import { noteLabel, str, useNote, type IndexedNote, type Json, type Query, type Repo } from '@gestalts/client';
 import { Markdown } from '../../primitives';
 import { NotePicker } from '../../widgets';
 import { definePerspective } from '../define/definePerspective';
-import { canvasOf, canvasValue, newCanvasKey, storedNodes } from './canvasNote';
+import { OLD_CANVASES, canvasOf, resolveStale, saveCanvas } from './canvasNote';
 import { canvasReducer, fromWire, nodeId, sameNodes, toWire, type CanvasAction, type CanvasNode } from './model';
 import { CanvasSaver } from './saver';
 
@@ -22,22 +22,23 @@ type Props = {
 };
 
 /**
- * Any note as an infinite canvas of free Markdown text and linked notes, stored as a `canvas@1` note that is
- * `canvas-of` it (made on the first change). Double-click the canvas to write there.
+ * Any note as an infinite canvas of free Markdown text and linked notes, stored on it as `canvas` (`canvas@2`).
+ * A canvas still in an old `canvas@1` note is shown, and folded into the note on the first change. Double-click the
+ * canvas to write there.
  */
 export const Canvas = definePerspective<{ canvases: Query }, Props>({
   id: 'canvas',
   title: 'Canvas',
-  data: { canvases: { tagsAll: ['canvas'] } },
+  data: { canvases: OLD_CANVASES },
   Component: ({ data, repo, host, onOpen, add }) => {
     const hostNote = useNote(host);
     const [generation, setGeneration] = useState(0);
     if (!hostNote) return <p className="p-8 text-center text-base-content/60">No note <code>{host}</code>.</p>;
-    const canvas = canvasOf(data.canvases, hostNote.id);
+    const canvas = canvasOf(hostNote, data.canvases);
     return (
       <ReactFlowProvider>
-        <Board key={`${host}:${generation}`} repo={repo} host={hostNote} canvas={canvas} onOpen={onOpen} add={add}
-               onReload={() => setGeneration((g) => g + 1)} />
+        <Board key={`${host}:${generation}`} repo={repo} host={hostNote} stored={canvas.nodes} stale={canvas.stale}
+               unwritable={canvas.unwritable} onOpen={onOpen} add={add} onReload={() => setGeneration((g) => g + 1)} />
       </ReactFlowProvider>
     );
   },
@@ -55,22 +56,30 @@ type Ctx = {
 const CanvasContext = createContext<Ctx | null>(null);
 const useCanvas = () => useContext(CanvasContext)!;
 
-type BoardProps = { repo: Repo; host: IndexedNote; canvas: IndexedNote | undefined; onOpen?: (key: string) => void; add?: Props['add']; onReload: () => void };
+type BoardProps = {
+  repo: Repo;
+  host: IndexedNote;
+  /** the canvas's nodes as stored (on the host, or in an old canvas note) */
+  stored: Json | undefined;
+  /** old canvas notes edited after they were folded in */
+  stale: IndexedNote[];
+  /** why the host can't be written, if it can't */
+  unwritable: string | null;
+  onOpen?: (key: string) => void;
+  add?: Props['add'];
+  onReload: () => void;
+};
 
-function Board({ repo, host, canvas, onOpen, add, onReload }: BoardProps) {
+function Board({ repo, host, stored, stale, unwritable, onOpen, add, onReload }: BoardProps) {
   const rf = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
   // the canvas as opened: the only truth while it's open, so nothing arriving later overwrites what's being done
-  const [initial] = useState(() => fromWire(storedNodes(canvas)));
+  const [initial] = useState(() => fromWire(stored));
   const [doc, dispatch] = useReducer(canvasReducer, initial.doc);
-  const key = canvas?.key ?? newCanvasKey(host.id);
-  const [saver] = useState(() => new CanvasSaver(
-    async (nodes) => { await repo.putValue(key, canvasValue(repo.get(key)?.value, key, host.id, nodes)); },
-    toWire(initial.doc),
-  ));
+  const [saver] = useState(() => new CanvasSaver((nodes) => saveCanvas(repo, host.key, nodes), toWire(initial.doc)));
   const save = useSyncExternalStore(saver.subscribe, saver.get);
   const [conflict, setConflict] = useState(false);
-  const readOnly = initial.problems.length > 0 || conflict;
+  const readOnly = initial.problems.length > 0 || conflict || unwritable !== null;
   const [editing, setEditing] = useState<string | null>(null);
   const [undo, setUndo] = useState<{ node: CanvasNode; index: number } | null>(null);
   const [picking, setPicking] = useState(false);
@@ -82,14 +91,21 @@ function Board({ repo, host, canvas, onOpen, add, onReload }: BoardProps) {
     if (!readOnly) saver.change(toWire(doc));
   }, [doc, saver, readOnly]);
 
-  // changed elsewhere (a sync, the raw editor) since this page last wrote it: stop writing, offer to reload
-  const stored = canvas?.raw;
+  // the nodes changed elsewhere (a sync, the raw editor) since this page last wrote them: stop writing, offer to
+  // reload. Other changes to the host (its `main`, …) don't count.
+  const storedText = JSON.stringify(stored ?? null);
   useEffect(() => {
-    if (!canvas || !saver.idle) return;
-    const now = toWire(fromWire(storedNodes(canvas)).doc);
+    if (stored === undefined || !saver.idle) return;
+    const now = toWire(fromWire(stored).doc);
     if (!sameNodes(now, saver.written)) setConflict(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `stored` stands for the canvas note's content
-  }, [stored, save, saver]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `storedText` stands for `stored`
+  }, [storedText, save, saver]);
+
+  const resolve = async (note: IndexedNote, take: boolean) => {
+    await saver.flush();
+    await resolveStale(repo, host.key, note, take);
+    if (take) onReload();
+  };
 
   useEffect(() => {
     const onHide = () => { if (document.visibilityState === 'hidden') void saver.flush(); };
@@ -180,14 +196,23 @@ function Board({ repo, host, canvas, onOpen, add, onReload }: BoardProps) {
               <NotePicker autofocus placeholder="Add a note to the canvas" onPick={(k) => { addNote(k); setPicking(false); }} />
             </Panel>
           )}
-          {readOnly && (
-            <Panel position="top-center">
-              <div role="alert" className="alert alert-warning alert-soft py-2 text-sm">
+          {(readOnly || stale.length > 0) && (
+            <Panel position="top-center" className="flex flex-col gap-1">
+              {stale.map((n) => (
+                <div key={n.key} role="alert" className="alert alert-warning alert-soft py-2 text-sm">
+                  <span>The old canvas note <code className="text-xs">{n.key}</code> was changed elsewhere after this canvas moved into the note.</span>
+                  <button type="button" className="btn btn-xs" onClick={() => void resolve(n, true)}>Use that version</button>
+                  <button type="button" className="btn btn-xs" onClick={() => void resolve(n, false)}>Keep this one</button>
+                </div>
+              ))}
+              {readOnly && <div role="alert" className="alert alert-warning alert-soft py-2 text-sm">
                 {initial.problems.length
                   ? <span>This canvas can't be read, so it's read-only until it's fixed in the note: {initial.problems.join('; ')}</span>
-                  : <span>The canvas changed elsewhere. Nothing more is written here.</span>}
+                  : unwritable
+                    ? <span>This canvas is read-only: {unwritable}.</span>
+                    : <span>The canvas changed elsewhere. Nothing more is written here.</span>}
                 {conflict && <button type="button" className="btn btn-xs" onClick={onReload}><RotateCcw className="size-3" /> Reload</button>}
-              </div>
+              </div>}
             </Panel>
           )}
         </ReactFlow>

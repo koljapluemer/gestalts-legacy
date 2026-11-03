@@ -5,6 +5,7 @@ export { GreekAlphabet } from './greek-alphabet/GreekAlphabet';
 export { ConnectorSettings, useConnectorState } from './connector-settings/ConnectorSettings';
 export { Canvas } from './canvas/Canvas';
 export { CanvasList } from './canvas/CanvasList';
+export { OLD_CANVASES, canvasLinksOf } from './canvas/canvasNote';
 export { TypstEditor } from './typst-editor/TypstEditor';
 export { TypstHosts } from './typst-editor/TypstHosts';
 export { createTypstDocument, documentsOf } from './typst-editor/typstDocument';

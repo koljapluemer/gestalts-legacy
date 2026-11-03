@@ -1,4 +1,7 @@
-import init, { WasmRepo, newId as wasmNewId, stableId as wasmStableId, stateKey as wasmStateKey } from '../wasm/gestalts.js';
+import init, {
+  WasmRepo, cardId as wasmCardId, contentHash as wasmContentHash, merge3 as wasmMerge3, newId as wasmNewId, stableId as wasmStableId,
+  stateKey as wasmStateKey,
+} from '../wasm/gestalts.js';
 import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
 
 export type RepoSource =
@@ -219,6 +222,27 @@ export function stableId(namespace: string, name: string): string {
  */
 export function stateKey(gestalt: string, target: string, facet?: string): string {
   return wasmStateKey(gestalt, target, facet);
+}
+
+/** What identifies a card within its note: dsl's `card_id`, 12 hex digits of the sha1 of its trimmed front. */
+export function cardId(front: string): string {
+  return wasmCardId(front);
+}
+
+/** The hashing `fold` needs, from the core. */
+export const hashing = { cardId: (front: string) => cardId(front), contentHash: (text: string) => contentHash(text) };
+
+/** Hex sha256 of a text. */
+export function contentHash(text: string): string {
+  return wasmContentHash(text);
+}
+
+/**
+ * Three-way merge of one note's text, as a sync does it (per top-level key; `relationships`, `blobs`, `tags` as sets).
+ * `text` is null for a deletion; `conflict` is the remote text when part of it lost to local.
+ */
+export function merge3(base: string | null, local: string | null, remote: string | null): { text: string | null; conflict: string | null } {
+  return wasmMerge3(base ?? undefined, local ?? undefined, remote ?? undefined) as { text: string | null; conflict: string | null };
 }
 
 const MIME: Record<string, string> = {

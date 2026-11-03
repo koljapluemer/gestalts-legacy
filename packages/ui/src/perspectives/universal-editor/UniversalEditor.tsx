@@ -1,6 +1,6 @@
 import { FileQuestion } from 'lucide-react';
 import { useNote, type Repo } from '@gestalts/client';
-import { EditableNote } from '../../widgets';
+import { EditableNote, NoteParts } from '../../widgets';
 import { definePerspective } from '../define/definePerspective';
 
 type Props = {
@@ -9,7 +9,7 @@ type Props = {
   onClose: (key: string) => void;
 };
 
-/** Any note as raw YAML, with live gestalt lints. Several can be open at once. */
+/** Any note as raw YAML, with live gestalt lints, and its cards and template. Several can be open at once. */
 export const UniversalEditor = definePerspective<Record<string, never>, Props>({
   id: 'universal-editor',
   title: 'Editor',
@@ -38,16 +38,19 @@ function OpenNote({ noteKey, autofocus, onClose, repo }: { noteKey: string; auto
     );
   }
   return (
-    <EditableNote
-      note={note}
-      autofocus={autofocus}
-      inspect={(raw) => repo.inspect(noteKey, raw)}
-      save={(raw) => repo.putRaw(noteKey, raw)}
-      onClose={onClose}
-      onDelete={() => {
-        if (!confirm(`Delete this note?\n${noteKey}`)) return;
-        void repo.delete(noteKey).then(onClose);
-      }}
-    />
+    <div className="flex flex-col gap-2">
+      <EditableNote
+        note={note}
+        autofocus={autofocus}
+        inspect={(raw) => repo.inspect(noteKey, raw)}
+        save={(raw) => repo.putRaw(noteKey, raw)}
+        onClose={onClose}
+        onDelete={() => {
+          if (!confirm(`Delete this note?\n${noteKey}`)) return;
+          void repo.delete(noteKey).then(onClose);
+        }}
+      />
+      <NoteParts note={note} repo={repo} />
+    </div>
   );
 }

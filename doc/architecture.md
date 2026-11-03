@@ -51,7 +51,7 @@ Tailwind + daisyUI + lucide are the real primitives; `primitives/` only adds wha
 
 - `primitives/`: CodeMirror host and theme, `HighlightedText`, text folding, `Markdown` (math, `[[id|label]]` links, `![[blob]]` embeds)
 - `components/`: `NoteLine`, `GestaltBadges`, `YamlEditor`
-- `widgets/`: `NoteResultList` (with per-result actions), `EditableNote`, `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
+- `widgets/`: `NoteResultList` (with per-result actions), `EditableNote`, `NoteParts` (cards and template editors), `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
 - `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `new-note`, `greek-alphabet`, `connector-settings`, `canvas`, `typst-editor`, `sources`. Slices don't import each other, except the shared `define` slice.
 - `panes/`: `ExplorerPane` (search + editor), `NewNotePane` (the new-note form on its own), `CanvasPane`, `Canvas2TypPane` (a note's canvas beside its Typst document), `SourcesPane`, `GreekAlphabetPane`. They share `SearchLayout`: the search on the right, whose results offer the pane's actions (open as canvas, add to this canvas, …), and at most one overlay over the pane (`panes/overlay.ts`): a note in the editor, or the new-note form the search's "+" opens. The overlay lives in the URL (`?overlay=note:<key>` or `new`); opening one pushes a history entry, so Back closes it, and opening another from inside it replaces it. Panes import perspectives only, through `perspectives/index.ts`.
 
@@ -82,11 +82,18 @@ Optional event props are capabilities: if the host leaves one unwired, the persp
 
 ## Canvas and Typst
 
-A canvas is a `canvas@1` note about its host note (`canvas-of`), made on the first change under the key
-`stableId("canvas", hostId)`. While it's open, the page's reducer is the only truth (`perspectives/canvas/model.ts`);
-`CanvasSaver` writes whole snapshots, debounced, one at a time, held while dragging. If the stored nodes change to
-something this page didn't write (a sync, the YAML editor), it stops writing and offers to reload. Linked notes are
-also `on-canvas` relationships, so they travel with the canvas.
+A canvas is the `canvas` key of its host note (`canvas@2`); its linked notes are `on-canvas` relationships of the
+host, so they travel with it. An old `canvas@1` note (`canvas-of` the host) is shown until the first change folds it
+into the host and retires it ([gestalts.md](gestalts.md#folded-parts)). While it's open, the page's reducer is the
+only truth (`perspectives/canvas/model.ts`); `CanvasSaver` writes whole snapshots, debounced, one at a time, held
+while dragging. If the stored nodes change to something this page didn't write (a sync, the YAML editor), it stops
+writing and offers to reload; changes to the host's other keys don't count. A host whose YAML doesn't parse makes
+the canvas read-only.
+
+The note editor shows a note's cards and template below its YAML (`widgets/NoteParts.tsx`), folding attached ones in
+on the first save the same way. Since a note can now be written by these and by the YAML editor at once, the YAML
+editor saves a draft as a 3-way merge against the text it started from (the core's `merge3`, per top-level key). If
+both changed the same key, it asks before overwriting.
 
 The Typst editor compiles through the connector's `typst@1` service (`plugins/typst`), sending the source, the
 document's `assets` (path → blob, fetched by the worker) and a bibliography of the sources it cites

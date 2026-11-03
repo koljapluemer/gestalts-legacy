@@ -9,7 +9,7 @@ pub mod repo;
 pub mod storage;
 pub mod upstream;
 
-pub use gestalt::{GestaltDef, Gestalts, Lint};
+pub use gestalt::{GestaltDef, Gestalts, Lint, card_id};
 pub use merge::{SyncReport, merge3, sync};
 pub use note::{Note, ParseError, Ref};
 pub use repo::{IndexedNote, Query, Repo, new_id, stable_id, state_key};

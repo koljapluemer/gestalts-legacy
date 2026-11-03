@@ -12,9 +12,11 @@ and `relationships`, `blobs` and `tags` merge as sets ([connector.md](connector.
 1. **Fold into the host**, each as a new gestalt version found by its key (`trigger_fields`), so old notes stay readable:
    - `canvas@2`: a `canvas: {nodes}` key; `on-canvas` relationships on the host.
    - `template@2`: a `template: {format, source}` key on the note it renders (`_index`, the portfolio).
-   - `cards`: a list of `{front, back}` on the host, replacing `flashcard@1` notes with `card-of`. A card's review
-     state is an `fsrs-state` with `facet` = the card's id (hash of its front, as dsl's `card_id`). A note that is just
-     a card (just-flashcards) stays `flashcard@1`.
+   - `cards`: a list of `{id, front, back}` on the host, replacing `flashcard@1` notes with `card-of`. A card's review
+     state is an `fsrs-state` with `facet` = the card's `id`: dsl's `card_id` of its front when it was made, stored so
+     it survives editing the front. (dsl hashed the front before the migration rewrote its links and embeds, so an
+     import of dsl review state maps ids through the dsl front its state files keep.) A note that is just a card
+     (just-flashcards) stays `flashcard@1`.
    - Worker output (card collages, viz builds) as keys the worker owns: `renders`, `viz`. Their blobs are also listed
      in `blobs`, labelled, so copy-on-write carries them.
 2. **Migrate in place, lazily.** The dsl migration has run, and its `canvas@1`, `template@1` and `card-of`
@@ -37,7 +39,7 @@ One plan session each, in this order. Each ends with a visual check in the app a
 Foundations:
 - [x] Set merge for `relationships`, `blobs`, `tags` in `merge3`
 - [x] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
-- [ ] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
+- [x] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
 - [ ] A repo per deck, so big decks don't load into one index
 - [ ] Shared learning layer: FSRS by facet, `practice-session` writer (trials, active time), cross-app stats page
 - [ ] Note parity with dsl: rendered `main`/`extra` with `[[links]]`, embeds, math and cards; backlinks widget;

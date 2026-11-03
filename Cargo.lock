@@ -1758,6 +1758,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "sha1_smol",
  "sha2",
  "thiserror 2.0.21",
  "unicode-normalization",

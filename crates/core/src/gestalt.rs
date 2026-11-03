@@ -301,7 +301,18 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../gestalts/practice-state/v1.yml"),
     include_str!("../../../gestalts/practice-session/v1.yml"),
     include_str!("../../../gestalts/settings/v1.yml"),
+    include_str!("../../../gestalts/canvas/v2.yml"),
+    include_str!("../../../gestalts/template/v2.yml"),
+    include_str!("../../../gestalts/cards/v1.yml"),
 ];
+
+/// What identifies a card within its note, as dsl computes it: sha1 of the front with trailing whitespace on each
+/// line and blank ends removed, its first 12 hex digits.
+pub fn card_id(front: &str) -> String {
+    let normalized = front.split('\n').map(str::trim_end).collect::<Vec<_>>().join("\n");
+    let hex = sha1_smol::Sha1::from(normalized.trim()).digest().to_string();
+    hex[..12].to_owned()
+}
 
 impl Gestalts {
     pub fn builtin() -> Self {
@@ -448,6 +459,27 @@ mod tests {
                 assert!(g.get(&id).is_some(), "{id} is missing from BUILTIN");
             }
         }
+    }
+
+    #[test]
+    fn folded_forms() {
+        let g = Gestalts::builtin();
+        has(&g, "title: host\ncanvas:\n  nodes:\n    - {id: a, x: 0, y: 1.5, text: hi}\n    - {id: b, x: 3, y: 4, note: n}\nrelationships: [{to: n, label: on-canvas}]\n", "canvas@2");
+        assert_eq!(lint_paths(&g, "canvas: {nodes: [{id: a, x: left, y: 0}]}\n"), vec!["canvas.nodes.0.x"]);
+        assert_eq!(lint_paths(&g, "canvas: {}\n"), vec!["canvas.nodes"]);
+        has(&g, "template: {format: jinja-html, source: \"<h1>{{ title }}</h1>\", name: _index.html.j2}\n", "template@2");
+        assert_eq!(lint_paths(&g, "template: {format: mustache}\n"), vec!["template.format", "template.source"]);
+        has(&g, "main: x\ncards:\n  - {id: d15af94d944d, front: Was ist das?, back: what is that}\n", "cards@1");
+        assert_eq!(lint_paths(&g, "cards: [{front: x}]\n"), vec!["cards.0.back", "cards.0.id"]);
+        // the old forms keep their gestalts
+        has(&g, "tags: [canvas]\nrelationships: [{to: h, label: canvas-of}]\nnodes: []\n", "canvas@1");
+    }
+
+    #[test]
+    fn card_ids_are_dsls() {
+        // values from dsl_crud.core.flashcards.card_id
+        assert_eq!(card_id("Was ist das?"), "d15af94d944d");
+        assert_eq!(card_id("  hola  \n\nmundo \n"), "594284149d1e");
     }
 
     #[track_caller]

@@ -1,38 +1,40 @@
-import { field, relationships, stableId, type IndexedNote, type Json } from '@gestalts/client';
-import { linkedNotes, type WireNode } from './model';
+import { asMap, field, fold, hashing, type IndexedNote, type Json, type Query, type Repo } from '@gestalts/client';
+import type { WireNode } from './model';
 
-export const CANVAS_OF = 'canvas-of';
-export const ON_CANVAS = 'on-canvas';
-
-/** The canvas about the note `hostId`: a `canvas@1` note that is `canvas-of` it. */
-export function canvasOf(canvases: IndexedNote[], hostId: string): IndexedNote | undefined {
-  return canvases.find((c) => relationships(c).some((r) => r.label === CANVAS_OF && r.target === hostId));
-}
-
-/** Where a host's canvas goes when it has none yet: the same key on every device, so two first edits are one note. */
-export const newCanvasKey = (hostId: string) => stableId('canvas', hostId);
+/** Canvas notes of the old form (`canvas@1`, `canvas-of` the host), retired ones included. */
+export const OLD_CANVASES: Query = { tagsAll: ['canvas'] };
 
 /**
- * The canvas note's value with these nodes: its other fields kept, tagged `canvas`, `canvas-of` the host and
- * `on-canvas` each linked note (so they travel with it), other relationships kept.
+ * A note's canvas as stored: the host's `canvas` key, else (not folded in yet) the `canvas@1` note that is
+ * `canvas-of` it. `stale`: old canvas notes edited after they were folded in.
  */
-export function canvasValue(existing: Json | null | undefined, key: string, hostId: string, nodes: WireNode[]): Json {
-  const base = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : { id: key };
-  const tags = Array.isArray(base.tags) ? base.tags : [];
-  const others = (Array.isArray(base.relationships) ? base.relationships : []).filter((r) => {
-    const label = r && typeof r === 'object' && !Array.isArray(r) ? r.label : null;
-    return label !== CANVAS_OF && label !== ON_CANVAS;
-  });
+export function canvasOf(host: IndexedNote, oldCanvases: IndexedNote[]) {
+  const attached = fold.attached(oldCanvases, host.id, 'canvas');
+  const read = fold.readCanvas(host, attached);
   return {
-    ...base,
-    tags: tags.includes('canvas') ? tags : [...tags, 'canvas'],
-    nodes: nodes.map((n) => ({ ...n })),
-    relationships: [
-      { to: hostId, label: CANVAS_OF },
-      ...linkedNotes(nodes).map((to) => ({ to, label: ON_CANVAS })),
-      ...others,
-    ],
+    nodes: read.value,
+    from: read.from,
+    stale: fold.staleFolds(fold.folded(oldCanvases, host.id, 'canvas'), 'canvas', hashing),
+    unwritable: fold.unwritable(host),
   };
 }
 
-export const storedNodes = (canvas: IndexedNote | undefined) => (canvas ? field(canvas, 'nodes') : undefined);
+/** The ids of the notes on a host's canvas. */
+export const canvasLinksOf = (host: IndexedNote, oldCanvases: IndexedNote[]) => fold.canvasLinks(canvasOf(host, oldCanvases).nodes);
+
+/** Saves the nodes on the host (keeping other keys of its `canvas`), and retires an old canvas note on the way. */
+export async function saveCanvas(repo: Repo, hostKey: string, nodes: WireNode[]): Promise<void> {
+  const host = repo.get(hostKey);
+  if (!host) throw new Error(`No note ${hostKey}`);
+  const attached = fold.attached(repo.query(OLD_CANVASES), host.id, 'canvas');
+  const value: Json = { ...asMap(field(host, 'canvas') ?? null), nodes: nodes.map((n) => ({ ...n })) };
+  await fold.writeFold(repo, hostKey, fold.foldWrites(host, 'canvas', value, attached, hashing));
+}
+
+/** An old canvas note edited after the fold: take its nodes into the host ("use that version"), or keep the host's. */
+export async function resolveStale(repo: Repo, hostKey: string, stale: IndexedNote, take: boolean): Promise<void> {
+  const host = repo.get(hostKey);
+  if (!host) return;
+  if (take) await fold.writeFold(repo, hostKey, fold.foldWrites(host, 'canvas', fold.adopt(host, stale, 'canvas', hashing), [], hashing));
+  await repo.putValue(stale.key, fold.acknowledge(stale, 'canvas', hashing));
+}

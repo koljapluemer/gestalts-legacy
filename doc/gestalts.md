@@ -54,9 +54,12 @@ Field options:
 | `daily@1` | tag `daily`, `date`; keyed `stableId("daily", date)`, so one note per date across devices |
 | `project@1` / `issue@1` | tag `project` / tag `issue` with at least one `project` relationship |
 | `published@1` | `publish_route` and `publish`: a note's text as published, apart from `main` |
-| `template@1` | tag `template`, `format` (`jinja-html`), `source` |
+| `template@1` | tag `template`, `format` (`jinja-html`), `source`; superseded by `template@2` |
 | `source@1` | tag `source`, `title`, `citekey`, `entrytype` and biblatex fields (see [Sources](#sources)) |
-| `canvas@1` | tag `canvas`, `nodes` (each `id`, `x`, `y` and `text` or `note`), one `canvas-of` relationship |
+| `canvas@1` | tag `canvas`, `nodes` (each `id`, `x`, `y` and `text` or `note`), one `canvas-of` relationship; superseded by `canvas@2` |
+| `canvas@2` | a `canvas` key with `nodes` (as in v1) on the note it's about; its linked notes are `on-canvas` relationships of that note |
+| `template@2` | a `template` key `{format, source, name}` on the note it renders |
+| `cards@1` | a `cards` key: a list of `{id, front, back}`; `id` (dsl's `card_id` of the front when made) is the `facet` of the card's `fsrs-state` |
 | `typst-document@1` | tag `typst`, `source`, `assets` (path → blob), blob `pdf` (at most one), `document-of` at most one |
 | `term@1` | tag `term`, `title` (the term), optional `lang`, `translations`, `transliteration`, `examples` (each `text`, `translation`, `credit`), `value` (a numeral's number); blobs `image`, `audio`, `doodle` at most one each; alternate spellings in `aliases` |
 | `sentence@1` | tag `sentence`, `title` (the sentence), optional `lang`, `translations`, `transcription`, `credits` (each `for`, `text`), `parts` (each `content`, `translations`, `transcription`, `examples`, `term` = a `term@1` id), `gaps` (each `word`, `at`, `distractors`), `start`/`end` in seconds with at most one `segment-of` |
@@ -68,11 +71,21 @@ Field options:
 | `practice-session@1` | tag `practice-session`, `app` (perspective id), `started`, optional `ended` (datetimes), `active_ms`, `trials`, `events` (each with `at`); random key, one writer |
 | `settings@1` | tag `settings`, `scope` (perspective id), further fields as the scope defines; keyed `stableId("settings", scope)` |
 
-Relationship labels with a meaning: `card-of` (a flashcard extracted from a note), `canvas-of` and `on-canvas` (a canvas
-and each note on it), `document-of` and `cites` (a Typst document or quote, its note and the sources it cites),
+Relationship labels with a meaning: `card-of` (a flashcard extracted from a note, the old form of `cards`), `canvas-of`
+(the old form of a note's canvas) and `on-canvas` (each note on a canvas), `document-of` and `cites` (a Typst document or quote, its note and the sources it cites),
 `template-of`, `reviews` (learner state and the note it's for), `segment-of` (a sentence and the recording it's spoken
 in), `distractor` (a country easily confused with this one), `member` (a group and its notes), `actor` and `target`
 (an interaction and its scene objects).
+
+## Folded parts
+
+A note's canvas, template and cards were attached notes (`canvas@1` `canvas-of`, `template@1` `template-of`,
+`flashcard@1` `card-of` it). They're keys on the note now, so they merge per key with the rest of it. Migrated data
+isn't rewritten. Readers take the note's key first, else the attached notes (`packages/client/src/fold.ts`). Every
+save through the new form writes the key and retires the attached notes: tag `retired` plus
+`folded: {into: <host id>, hash: <sha256 of the part as folded>, card: <id>}` (`card` for cards only). A retired
+note whose part no longer matches `hash` was edited after the fold (another device, the YAML editor), and the
+editors offer it back: "Use that version" or "Keep this one".
 
 ## Sources
 

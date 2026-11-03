@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FilePlus2, FileType, PanelLeft, SquarePlus } from 'lucide-react';
-import { noteLabel, relationships, useNote, useQuery, useRepo } from '@gestalts/client';
-import { Canvas, TypstEditor, TypstHosts, createTypstDocument, documentsOf } from '../perspectives';
+import { noteLabel, useNote, useQuery, useRepo } from '@gestalts/client';
+import { Canvas, OLD_CANVASES, TypstEditor, TypstHosts, canvasLinksOf, createTypstDocument, documentsOf } from '../perspectives';
 import { useOverlay } from './overlay';
 import { SearchLayout } from './SearchLayout';
 import { useUrlList } from './urlState';
@@ -21,14 +21,11 @@ export function Canvas2TypPane() {
   const edit = (key: string) => overlays.open({ kind: 'note', key });
   const hostNote = useNote(host);
   const documents = useQuery({ tagsAll: ['typst'] });
-  const canvases = useQuery({ tagsAll: ['canvas'] });
+  const canvases = useQuery(OLD_CANVASES);
   const docs = hostNote ? documentsOf(documents, hostNote.id) : [];
   const doc = docs.find((d) => d.key === picked) ?? docs[0];
   // sources on the canvas are offered first when citing
-  const onCanvas = hostNote
-    ? canvases.filter((c) => relationships(c).some((r) => r.label === 'canvas-of' && r.target === hostNote.id))
-      .flatMap((c) => relationships(c).filter((r) => r.label === 'on-canvas').map((r) => r.target))
-    : [];
+  const onCanvas = hostNote ? canvasLinksOf(hostNote, canvases) : [];
 
   const show = (key: string) => { setHost([key]); setPicked([]); setListing(false); };
   const openHere = async (key: string) => {

@@ -182,6 +182,26 @@ pub fn state_key(gestalt: &str, target: &str, facet: Option<String>) -> String {
     gestalts_core::state_key(gestalt, target, facet.as_deref())
 }
 
+/// What identifies a card within its note (dsl's `card_id`).
+#[wasm_bindgen(js_name = cardId)]
+pub fn card_id(front: &str) -> String {
+    gestalts_core::card_id(front)
+}
+
+/// Hex sha256 of a text.
+#[wasm_bindgen(js_name = contentHash)]
+pub fn content_hash(text: &str) -> String {
+    gestalts_core::content_hash(text.as_bytes())
+}
+
+/// Three-way merge of one note's text, as sync does: `{text, conflict}`, `text` null for a deletion and
+/// `conflict` the remote text when part of it lost.
+#[wasm_bindgen(js_name = merge3)]
+pub fn merge3(base: Option<String>, local: Option<String>, remote: Option<String>) -> Result<JsValue, JsError> {
+    let m = gestalts_core::merge3(base.as_deref(), local.as_deref(), remote.as_deref());
+    to_js(&serde_json::json!({ "text": m.text, "conflict": m.conflict }))
+}
+
 /// BibTeX text as sources: `[{source, warnings}]`.
 #[wasm_bindgen(js_name = bibParse)]
 pub fn bib_parse(text: &str) -> Result<JsValue, JsError> {
