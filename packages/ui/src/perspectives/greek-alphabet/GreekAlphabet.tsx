@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { blob, fsrsStates, getScheduler, Rating, saveReview, str, useBlobUrl, usePracticeSession, type Grade, type IndexedNote, type Query } from '@gestalts/client';
+import { blob, fsrsStates, getScheduler, logger, Rating, saveReview, str, useBlobUrl, usePracticeSession, type Grade, type IndexedNote, type Query } from '@gestalts/client';
 import { definePerspective } from '../define/definePerspective';
 import { facetOf, isStruggling, nextCard, rate } from './schedule';
+
+const glog = logger('greek');
 
 type Props = {
   /** which pronunciation cards to practise */
@@ -44,9 +46,11 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
       const now = new Date();
       const f = facetOf(card.id);
       const prev = states.get(f);
+      glog.info('rate', { id: card.id, grade, prevDue: prev?.card.dueAt ?? null });
       const saved = await saveReview(repo, f, prev, rate(await getScheduler(), prev, grade, now), log);
       const updated = states.with(f, saved);
       const following = nextCard(data.cards, updated, card.id, now);
+      glog.info('rated', { id: card.id, nextDue: saved.card.dueAt, next: following?.id ?? null });
       setCurrent({ id: following?.id ?? null, last: card.id, picked: true });
     };
 

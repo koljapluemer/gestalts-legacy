@@ -10,3 +10,4 @@ export { learnableCards, pickNext, slotOf, until, type LearnCard, type Pick as L
 export { IDLE_MS, SESSION_GAP_MS, PracticeSession, type SessionEvent } from './session';
 export { usePracticeSession, saveReview, type PracticeLog } from './practice';
 export type * from './types';
+export { CAPACITY as LOG_CAPACITY, debugLog, installGlobalCapture, logger, onDebugLog, type DebugSnapshot, type Level as LogLevel, type LogEvent, type Logger, type Span } from './log';

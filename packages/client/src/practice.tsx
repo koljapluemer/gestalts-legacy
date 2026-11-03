@@ -3,6 +3,9 @@ import { useRepo } from './react';
 import { newId, stateKey, type Repo } from './repo';
 import { fsrsStateValue, type Facet, type ReviewState } from './learning';
 import { PracticeSession, type SessionEvent } from './session';
+import { logger } from './log';
+
+const plog = logger('practice');
 
 /** What a perspective logs its practice with; see `PracticeSession`. */
 export type PracticeLog = {
@@ -55,7 +58,14 @@ export function usePracticeSession(app: string): PracticeLog {
  */
 export async function saveReview(repo: Repo, f: Facet, prev: ReviewState | undefined, next: ReviewState, log?: PracticeLog): Promise<ReviewState> {
   const key = prev?.key ?? stateKey('fsrs-state', f.target, f.facet);
-  const saved = await repo.putValue(key, fsrsStateValue(key, f, next));
-  await log?.trial({ kind: 'fsrs-review', target: f.target, ...(f.facet ? { facet: f.facet } : {}), rating: next.lastRating });
-  return { ...next, key: saved.key };
+  const span = plog.span('saveReview', { target: f.target, facet: f.facet, key, rating: next.lastRating, dueAt: next.card.dueAt });
+  try {
+    const saved = await repo.putValue(key, fsrsStateValue(key, f, next));
+    await log?.trial({ kind: 'fsrs-review', target: f.target, ...(f.facet ? { facet: f.facet } : {}), rating: next.lastRating });
+    span.end();
+    return { ...next, key: saved.key };
+  } catch (e) {
+    span.fail(e);
+    throw e;
+  }
 }

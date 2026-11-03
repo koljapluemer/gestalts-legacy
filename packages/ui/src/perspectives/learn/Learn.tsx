@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import {
-  fsrsStates, getScheduler, hashing, learnableCards, pickNext, Rating, review, saveReview, slotOf, until, usePracticeSession,
+  fsrsStates, getScheduler, hashing, learnableCards, logger, pickNext, Rating, review, saveReview, slotOf, until, usePracticeSession,
   type FsrsStates, type Grade, type LearnCard, type Query,
 } from '@gestalts/client';
 import { Markdown } from '../../primitives/Markdown';
 import { definePerspective } from '../define/definePerspective';
+
+const log = logger('learn');
 
 type Props = {
   /** open a card's note (its host, or the card note); without it there's no button for it */
@@ -44,7 +46,10 @@ export const Learn = definePerspective<{ hosts: Query; flashcards: Query; review
     // reviews saved here, until the query has them: the next pick mustn't wait for it
     const [saved, setSaved] = useState<{ base: FsrsStates; states: FsrsStates } | null>(null);
     const states = saved?.base === stored ? saved.states : stored;
-    const log = usePracticeSession('learn');
+    const session = usePracticeSession('learn');
+    // the latest `stored`, to log whether the query caught up while a rating was being saved
+    const storedRef = useRef(stored);
+    useEffect(() => { storedRef.current = stored; }, [stored]);
     const [current, setCurrent] = useState<{ slot: string | null; last: string | null; at: number }>({ slot: null, last: null, at: Date.now() });
 
     const pick = useMemo(() => pickNext(cards, states, current.last, new Date(current.at)), [cards, states, current.last, current.at]);
@@ -55,11 +60,20 @@ export const Learn = definePerspective<{ hosts: Query; flashcards: Query; review
     useEffect(() => {
       if (slot && slot !== current.slot) setCurrent((c) => ({ ...c, slot }));
     }, [slot, current.slot]);
+    useEffect(() => {
+      if (current.slot !== null) return;
+      // a fresh pick (after a rating, or on opening): what came up and why
+      const data = { slot, last: current.last, counts: pick.counts, nextDue: pick.nextDue, states: saved?.base === stored ? 'saved' : 'stored' };
+      if (slot && slot === current.last) log.warn('picked the card just rated again', data);
+      else log.info(slot ? 'pick' : 'nothing to pick', data);
+    }, [slot, current.slot, current.last, pick, saved, stored]);
 
     const onRate = async (c: LearnCard, grade: Grade) => {
       const at = new Date();
       const prev = states.get(c.facet);
-      const next = await saveReview(repo, c.facet, prev, review(await getScheduler(), prev, grade, at), log);
+      log.info('rate', { slot: slotOf(c.facet), grade, prevDue: prev?.card.dueAt ?? null });
+      const next = await saveReview(repo, c.facet, prev, review(await getScheduler(), prev, grade, at), session);
+      log.info('rated', { slot: slotOf(c.facet), nextDue: next.card.dueAt, storedChanged: stored !== storedRef.current });
       setSaved({ base: stored, states: states.with(c.facet, next) });
       setCurrent({ slot: null, last: slotOf(c.facet), at: Date.now() });
     };
@@ -80,7 +94,7 @@ export const Learn = definePerspective<{ hosts: Query; flashcards: Query; review
           {counts}
         </div>
         {card ? (
-          <Review key={slot} card={card} onShown={log.shown} onOpen={onOpen} onRate={(g) => onRate(card, g)} />
+          <Review key={slot} card={card} onShown={session.shown} onOpen={onOpen} onRate={(g) => onRate(card, g)} />
         ) : (
           <div className="flex flex-col items-center gap-3 p-8 text-center text-base-content/60">
             <p>{!cards.length ? 'No flashcards.' : pick.nextDue ? `Nothing due. Next in ${until(pick.nextDue)}.` : 'Nothing due.'}</p>

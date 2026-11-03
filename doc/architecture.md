@@ -6,7 +6,7 @@ crates/fs          Storage adapter: a folder on disk
 crates/wasm        the core in the browser + adapters: OPFS, static site, connector (HTTP)
 crates/connector   gestalts-connector: desktop app serving a folder on localhost, and the plugin host
 gestalts/          gestalt definitions (data, embedded into the core)
-packages/client    TS wrapper of the wasm core: Repo, React hooks, field helpers, the learning layer (FSRS, sessions)
+packages/client    TS wrapper of the wasm core: Repo, React hooks, field helpers, the learning layer (FSRS, sessions), the debug log
 packages/ui        primitives → components → widgets → perspectives → panes
 apps/gestalter     main app: switch between all panes
 apps/demo          public-facing Greek letters practice
@@ -54,6 +54,8 @@ Tailwind + daisyUI + lucide are the real primitives; `primitives/` only adds wha
 - `widgets/`: `NoteResultList` (with per-result actions), `NoteView`, `NoteTextEditor`, `EditableNote` (YAML), `NoteParts` (cards and template editors), `Relationships` (with backlinks), `MediaGallery`, `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
 - `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `new-note`, `greek-alphabet`, `learn`, `connector-settings`, `canvas`, `typst-editor`, `sources`. Slices don't import each other, except the shared `define` slice.
 - `panes/`: `ExplorerPane` (search + editor), `NewNotePane` (the new-note form on its own), `CanvasPane`, `Canvas2TypPane` (a note's canvas beside its Typst document), `SourcesPane`, `LearnPane`, `GreekAlphabetPane`. They share `SearchLayout`: the search on the right, whose results offer the pane's actions (open as canvas, add to this canvas, …), and at most one overlay over the pane (`panes/overlay.ts`): a note in the editor, or the new-note form the search's "+" opens. The overlay lives in the URL (`?overlay=note:<key>` or `new`); opening one pushes a history entry, so Back closes it, and opening another from inside it replaces it. Panes import perspectives only, through `perspectives/index.ts`.
+
+- `debug/` (`@gestalts/ui/debug`, beside the layers, for app shells): `ErrorBoundary` (around each pane), `DebugLogButton`. See [debugging.md](debugging.md).
 
 `oxlint.config.ts` enforces this (eslint-plugin-boundaries). Within primitives, components and widgets, files of the same layer may share code. "Not from neighbours" is enforced between perspective slices only.
 

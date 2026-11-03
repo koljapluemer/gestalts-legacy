@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     "./panes": "./src/panes/index.ts",
-    "./perspectives": "./src/perspectives/index.ts"
+    "./perspectives": "./src/perspectives/index.ts",
+    "./debug": "./src/debug/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."

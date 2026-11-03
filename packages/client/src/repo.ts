@@ -2,7 +2,10 @@ import init, {
   WasmRepo, cardId as wasmCardId, contentHash as wasmContentHash, merge3 as wasmMerge3, newId as wasmNewId, stableId as wasmStableId,
   stateKey as wasmStateKey,
 } from '../wasm/gestalts.js';
+import { logger } from './log';
 import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
+
+const log = logger('repo');
 
 export type RepoSource =
   /** notes live in OPFS under `dir` */
@@ -41,6 +44,8 @@ let ready: Promise<unknown> | null = null;
 export class Repo {
   private listeners = new Set<() => void>();
   private queue: Promise<unknown> = Promise.resolve();
+  /** mutations queued or running, for the log */
+  private pending = 0;
   private blobUrls = new Map<string, Promise<string | null>>();
   private status: ConnectorStatus = { url: null, state: 'off', conflicts: [] };
   private statusListeners = new Set<() => void>();
@@ -51,9 +56,17 @@ export class Repo {
   private constructor(private wasm: WasmRepo, private storageKey: string) {}
 
   static async open(source: RepoSource): Promise<Repo> {
-    ready ??= init();
-    await ready;
-    const wasm = source.kind === 'opfs' ? await WasmRepo.opfs(source.dir) : await WasmRepo.layered(source.staticBase, source.dir);
+    const span = log.span('open', { kind: source.kind, dir: source.dir });
+    let wasm: WasmRepo;
+    try {
+      ready ??= init();
+      await ready;
+      wasm = source.kind === 'opfs' ? await WasmRepo.opfs(source.dir) : await WasmRepo.layered(source.staticBase, source.dir);
+    } catch (e) {
+      span.fail(e);
+      throw e;
+    }
+    span.end();
     const repo = new Repo(wasm, `gestalts-connector:${source.dir}`);
     let saved: string | null = null;
     try { saved = localStorage.getItem(repo.storageKey); } catch { /* no storage: start disconnected */ }
@@ -68,12 +81,32 @@ export class Repo {
 
   private changed() {
     this.version++;
+    log.debug('changed', { version: this.version });
     this.listeners.forEach((l) => l());
   }
 
-  /** Runs mutations one at a time, so a sync never interleaves with a write. */
-  private serial<T>(f: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(f, f);
+  /**
+   * Runs mutations one at a time, so a sync never interleaves with a write. Logged as a span named `name` from when
+   * it starts, with how long it waited behind the ones before it.
+   */
+  private serial<T>(name: string, f: () => Promise<T>, data?: Record<string, unknown>): Promise<T> {
+    const queuedAt = Date.now();
+    const ahead = this.pending++;
+    if (ahead) log.debug(`${name}: queued`, { ...data, ahead });
+    const go = async () => {
+      const span = log.span(name, { ...data, waitedMs: Date.now() - queuedAt });
+      try {
+        const r = await f();
+        span.end();
+        return r;
+      } catch (e) {
+        span.fail(e);
+        throw e;
+      } finally {
+        this.pending--;
+      }
+    };
+    const run = this.queue.then(go, go);
     this.queue = run.catch(() => undefined);
     return run;
   }
@@ -111,20 +144,20 @@ export class Repo {
   }
 
   async putRaw(key: string, raw: string): Promise<IndexedNote> {
-    const n = await this.serial(() => this.wasm.putRaw(key, raw) as Promise<IndexedNote>);
+    const n = await this.serial('putRaw', () => this.wasm.putRaw(key, raw) as Promise<IndexedNote>, { key });
     this.afterWrite();
     return n;
   }
 
   /** Without a key, a new uuid becomes key and `id`. */
   async putValue(key: string | undefined, value: Json): Promise<IndexedNote> {
-    const n = await this.serial(() => this.wasm.putValue(key, JSON.stringify(value)) as Promise<IndexedNote>);
+    const n = await this.serial('putValue', () => this.wasm.putValue(key, JSON.stringify(value)) as Promise<IndexedNote>, { key });
     this.afterWrite();
     return n;
   }
 
   async delete(key: string): Promise<void> {
-    await this.serial(() => this.wasm.delete(key));
+    await this.serial('delete', () => this.wasm.delete(key), { key });
     this.afterWrite();
   }
 
@@ -133,7 +166,7 @@ export class Repo {
   }
 
   async writeBlob(name: string, bytes: Uint8Array): Promise<void> {
-    await this.serial(() => this.wasm.writeBlob(name, bytes));
+    await this.serial('writeBlob', () => this.wasm.writeBlob(name, bytes), { name, bytes: bytes.length });
     this.blobUrls.delete(name);
     this.afterWrite();
   }
@@ -173,6 +206,7 @@ export class Repo {
 
   /** Syncs with the connector at `url` now, then after each write and every 15 s. */
   async connect(url: string): Promise<void> {
+    log.info('connect', { url });
     try { localStorage.setItem(this.storageKey, url); } catch { /* not remembered */ }
     clearInterval(this.pollTimer);
     this.setStatus({ url, state: 'syncing', error: undefined, conflicts: [] });
@@ -181,6 +215,7 @@ export class Repo {
   }
 
   disconnect() {
+    log.info('disconnect');
     try { localStorage.removeItem(this.storageKey); } catch { /* nothing remembered */ }
     clearInterval(this.pollTimer);
     clearTimeout(this.syncTimer);
@@ -193,8 +228,9 @@ export class Repo {
     this.setStatus({ state: 'syncing' });
     try {
       const tag = new Date().toISOString().replace(/[:.]/g, '-');
-      const report = await this.serial(() => this.wasm.sync(url, tag) as Promise<SyncReport>);
+      const report = await this.serial('sync', () => this.wasm.sync(url, tag) as Promise<SyncReport>);
       if (this.status.url !== url) return report;
+      log.info('sync done', { pushed: report.pushed.length, pulled: report.pulled.length, blobsPulled: report.blobs_pulled.length, conflicts: report.conflicts.length });
       this.setStatus({ state: 'ok', lastSync: new Date(), lastReport: report, folder: report.folder, conflicts: [...this.status.conflicts, ...report.conflicts] });
       if (report.pulled.length || report.blobs_pulled.length) {
         report.blobs_pulled.forEach((b) => this.blobUrls.delete(b));
@@ -202,6 +238,7 @@ export class Repo {
       }
       return report;
     } catch (e) {
+      log.error('sync failed', { error: e });
       this.setStatus({ state: 'error', error: e instanceof Error ? e.message : String(e) });
     }
   }

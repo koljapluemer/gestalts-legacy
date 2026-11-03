@@ -5,11 +5,13 @@ import { defineConfig } from 'oxlint';
  * panes > perspectives > widgets > components > primitives.
  * Perspectives don't import each other (except the shared `define` slice), and panes see
  * perspectives only through their index.
- * Every layer may use @gestalts/client and external packages.
+ * Every layer may use @gestalts/client and external packages. `debug` (error boundary, log button) is for app
+ * shells and uses nothing else.
  */
 const ui = 'packages/ui/src';
 const below: Record<string, string[]> = {
   primitive: [],
+  debug: [],
   component: ['primitive'],
   widget: ['component', 'primitive'],
   perspective: ['widget', 'component', 'primitive'],
@@ -33,6 +35,7 @@ export default defineConfig({
       // files directly in perspectives/: the index panes import
       { type: 'perspective-index', pattern: `${ui}/perspectives` },
       { type: 'pane', pattern: `${ui}/panes` },
+      { type: 'debug', pattern: `${ui}/debug` },
     ],
   },
   rules: {

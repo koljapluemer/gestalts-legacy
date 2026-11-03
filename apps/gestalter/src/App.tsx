@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { Cable } from 'lucide-react';
 import { RepoProvider, useOpenRepo } from '@gestalts/client';
+import { DebugLogButton, ErrorBoundary } from '@gestalts/ui/debug';
 import { panes } from '@gestalts/ui/panes';
 import { ConnectorSettings, useConnectorState } from '@gestalts/ui/perspectives';
 
@@ -27,9 +28,10 @@ function Shell() {
             </button>
           ))}
         </div>
+        <DebugLogButton />
         <ConnectorMenu />
       </nav>
-      <main className="min-h-0 flex-1"><entry.Pane key={entry.id} /></main>
+      <main className="min-h-0 flex-1"><ErrorBoundary key={entry.id} name={entry.label}><entry.Pane /></ErrorBoundary></main>
     </div>
   );
 }
