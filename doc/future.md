@@ -1,11 +1,85 @@
 # Not built yet
 
+The gestalts planned for bringing in dsl and sam-learns-things: [integration-gestalts.md](integration-gestalts.md).
+
+## Fewer attached notes
+
+A separate note is for something with its own writer or identity. A note's own canvas, template, cards or renders are
+parts of that note and should be keys on it. Merge is per top-level key, so a `canvas` key never conflicts with `main`.
+What forces the split today is that `relationships` and `blobs` are each one key: a canvas save adding an `on-canvas`
+relationship conflicts with a relationship edited on another device.
+
+1. **Set merge** in `merge3` for `relationships`, `blobs` and `tags`: an item either side added is kept, an item
+   either side removed is dropped. Order follows local, with remote additions appended.
+2. **Fold into the host**, each as a new gestalt version found by its key (`trigger_fields`), so old notes stay readable:
+   - `canvas@2`: a `canvas: {nodes}` key; `on-canvas` relationships on the host.
+   - `template@2`: a `template: {format, source}` key on the note it renders (`_index`, the portfolio).
+   - `cards`: a list of `{front, back}` on the host, replacing `flashcard@1` notes with `card-of`. A card's review
+     state is an `fsrs-state` with `facet` = the card's id (hash of its front, as dsl's `card_id`). A note that is just
+     a card (just-flashcards) stays `flashcard@1`.
+   - Worker output (card collages, viz builds) as keys the worker owns: `renders`, `viz`. Their blobs are also listed
+     in `blobs`, labelled, so copy-on-write carries them.
+3. **Migrate in place, lazily.** The dsl migration has run, and its `canvas@1`, `template@1` and `card-of`
+   `flashcard@1` notes are in use and syncing between devices. There's no bulk rewrite. Perspectives read both forms,
+   the host's key first. The first write through the new form folds the attached note into the host and tags the
+   old note `retired`. It isn't deleted, since sync lets an edit beat a delete. If another device edits the old note
+   after that, it's newer than the fold: offer it as a conflict on the host, as the canvas's reload does today.
+   New notes are written in the new form only.
+
+Separate notes stay where they have their own writer or identity:
+- learner state on deck content (`fsrs-state`, `practice-state`): it must not touch the copied note, or the copy stops
+  being untouched and no longer fast-forwards ([copy-on-write](architecture.md#copy-on-write-from-a-deck))
+- `practice-session`: append-only logs, one writer each
+- `source@1`, cited by many notes; `typst-document@1`, an essay of its own and possibly several per note
+
+## Plans
+
+One plan session each, in this order. Each ends with a visual check in the app and `doc/` updated.
+
+Foundations:
+- [ ] Set merge for `relationships`, `blobs`, `tags` in `merge3`
+- [ ] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
+- [ ] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
+- [ ] A repo per deck, so big decks don't load into one index
+- [ ] Shared learning layer: FSRS by facet, `practice-session` writer (trials, active time), cross-app stats page
+- [ ] Note parity with dsl: rendered `main`/`extra` with `[[links]]`, embeds, math and cards; backlinks widget;
+  media attach and camera; `[[` completion
+
+dsl:
+- [ ] Learn
+- [ ] Daily and Calendar (day/range views, past-appointment cleanup)
+- [ ] Projects, Goals, Tasks
+- [ ] Desk, Explorations, Tags, Suggest
+- [ ] Queue, Float, Questions (Ollama service)
+- [ ] Graph
+- [ ] Published and the site export
+- [ ] Portfolio, card collages (`renders`, Chromium plugin), PDF export
+- [ ] Viz blocks (`viz`, claude CLI plugin)
+- [ ] Semantic search (Ollama embeddings), continuous `.bib` export, orphaned-blob cleanup
+
+sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate the actual per-user learning data, not needed)):
+- [ ] quotes
+- [ ] learn-flags, world-map
+- [ ] top-vocab, dont-translate
+- [ ] 20-words
+- [ ] with-videos
+- [ ] infinitesentences
+- [ ] saetze, egyptiansentences
+- [ ] hebrewscript, minimal-pairs-practice
+- [ ] arabicnumbers, typingpractice
+- [ ] currency-conversion-practice, triangle-congruence
+- [ ] simplify-expressions
+- [ ] tprboard
+- [ ] al-kutshina
+
+## Other
+
 - **Android connector**: the same `Storage` port over Android storage. The core has no desktop-only dependencies.
 - **Obsidian two-way sync**: likely a converter between Markdown with frontmatter and notes, plus the existing `sync`.
 - **Browser plugin** (e.g. vocabulary from Duolingo): it would write through the connector API.
 - Modification times in the `Storage` port, which the search would need for a "recent" list.
 - Authentication for the connector (a token per app).
-- A Learn pane for `flashcard@1` notes (the ones migrated from dsl have no review state yet; `fsrs-state@1` is ready for it).
+- A Learn pane for flashcards, `flashcard@1` notes and `cards` on notes (the ones migrated from dsl have no review state yet; `fsrs-state@1` is ready for it).
 - Rendering `main` as Markdown in the Explorer, with `[[id]]` links and `![[blob]]` embeds (the canvas does already).
 - Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).
 - Undo for more than the last canvas removal; text ↔ note conversions are not undoable yet.
