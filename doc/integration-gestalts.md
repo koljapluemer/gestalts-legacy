@@ -43,8 +43,8 @@ become plain deck notes (title, explanation in `main`), so `practice-state@1` ha
 
 - `fsrs-state@1`: an optional `facet`, with the key above, for cards that are one facet of a note. Examples: a
   quote's cloze level, a world-map exercise (`find-in-neighborhood:2`), a top-vocab level, an infinitesentences gloss,
-  a tprboard instruction text. Notes without `facet` keep their meaning. Migrating py-fsrs (dsl) and older ts-fsrs
-  cards (sam-learns) means converting them to the v6 card.
+  a tprboard instruction text. Notes without `facet` keep their meaning. Review state from dsl (py-fsrs) and
+  sam-learns isn't migrated; their cards start new.
 - `pronunciation-card@1` already fits hebrewscript and minimal-pairs clips (`title` the transcript, blob `audio`,
   `lang`); minimal-pairs' `nativeScript` goes in `aliases`.
 - `flashcard@1` covers just-flashcards as is; cards in other notes are a `cards` key (`cards@1`, each with an `id` for its `facet`; [gestalts.md](gestalts.md#folded-parts)).

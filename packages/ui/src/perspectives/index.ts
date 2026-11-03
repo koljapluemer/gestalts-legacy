@@ -12,3 +12,4 @@ export { createTypstDocument, documentsOf } from './typst-editor/typstDocument';
 export { Sources } from './sources/Sources';
 export type { NoteAction } from './search-sidebar/SearchSidebar';
 export { NewNote } from './new-note/NewNote';
+export { Learn } from './learn/Learn';

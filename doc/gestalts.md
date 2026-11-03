@@ -125,3 +125,6 @@ Perspectives share this through `@gestalts/client` (`learning.ts`, `session.ts`,
   `shown()` marks when a card appears; `trial(event)` appends `{at, ms, …event}`, `ms` being the time since `shown()`.
 - A review event is `{at, ms, kind: fsrs-review, target, facet?, rating}`. It replaces the review log py-fsrs kept in
   its state file. Other apps add their own `kind`s.
+- Flashcards (Learn): a card of a note (`cards`, or a `flashcard@1` `card-of` it) is the facet `<card id>` of that
+  note; a `flashcard@1` of its own is reviewed as the whole note. dsl's review state wasn't carried over, so its cards
+  start new.

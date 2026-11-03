@@ -14,8 +14,7 @@ and `relationships`, `blobs` and `tags` merge as sets ([connector.md](connector.
    - `template@2`: a `template: {format, source}` key on the note it renders (`_index`, the portfolio).
    - `cards`: a list of `{id, front, back}` on the host, replacing `flashcard@1` notes with `card-of`. A card's review
      state is an `fsrs-state` with `facet` = the card's `id`: dsl's `card_id` of its front when it was made, stored so
-     it survives editing the front. (dsl hashed the front before the migration rewrote its links and embeds, so an
-     import of dsl review state maps ids through the dsl front its state files keep.) A note that is just a card
+     it survives editing the front. A note that is just a card
      (just-flashcards) stays `flashcard@1`.
    - Worker output (card collages, viz builds) as keys the worker owns: `renders`, `viz`. Their blobs are also listed
      in `blobs`, labelled, so copy-on-write carries them.
@@ -45,7 +44,7 @@ Foundations:
   media attach and camera; `[[` completion
 
 dsl:
-- [ ] Learn
+- [x] Learn
 - [ ] Daily and Calendar (day/range views, past-appointment cleanup)
 - [ ] Projects, Goals, Tasks
 - [ ] Desk, Explorations, Tags, Suggest
@@ -78,7 +77,6 @@ sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate t
 - **Browser plugin** (e.g. vocabulary from Duolingo): it would write through the connector API.
 - Modification times in the `Storage` port, which the search would need for a "recent" list.
 - Authentication for the connector (a token per app).
-- A Learn pane for flashcards, `flashcard@1` notes and `cards` on notes (the ones migrated from dsl have no review state yet; `fsrs-state@1` is ready for it).
 - Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).
 - Undo for more than the last canvas removal; text ↔ note conversions are not undoable yet.
 - Learner activity and time statistics. `practice-session@1` notes record trials and active time now, but no page shows them yet (sam-learns' own statistics weren't migrated).

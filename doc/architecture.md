@@ -52,8 +52,8 @@ Tailwind + daisyUI + lucide are the real primitives; `primitives/` only adds wha
 - `primitives/`: CodeMirror host and theme, `HighlightedText`, text folding, `Markdown` (math, `[[id|label]]` links, `![[blob]]` embeds: images, video, audio, else a link), `MarkdownEditor` (`[[` completion, references openable with Mod-click)
 - `components/`: `NoteLine`, `GestaltBadges`, `YamlEditor`
 - `widgets/`: `NoteResultList` (with per-result actions), `NoteView`, `NoteTextEditor`, `EditableNote` (YAML), `NoteParts` (cards and template editors), `Relationships` (with backlinks), `MediaGallery`, `NotePicker`, `SourcePicker`, the note search (`noteSearch.ts`)
-- `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `new-note`, `greek-alphabet`, `connector-settings`, `canvas`, `typst-editor`, `sources`. Slices don't import each other, except the shared `define` slice.
-- `panes/`: `ExplorerPane` (search + editor), `NewNotePane` (the new-note form on its own), `CanvasPane`, `Canvas2TypPane` (a note's canvas beside its Typst document), `SourcesPane`, `GreekAlphabetPane`. They share `SearchLayout`: the search on the right, whose results offer the pane's actions (open as canvas, add to this canvas, …), and at most one overlay over the pane (`panes/overlay.ts`): a note in the editor, or the new-note form the search's "+" opens. The overlay lives in the URL (`?overlay=note:<key>` or `new`); opening one pushes a history entry, so Back closes it, and opening another from inside it replaces it. Panes import perspectives only, through `perspectives/index.ts`.
+- `perspectives/<slice>/`: `search-sidebar`, `universal-editor`, `new-note`, `greek-alphabet`, `learn`, `connector-settings`, `canvas`, `typst-editor`, `sources`. Slices don't import each other, except the shared `define` slice.
+- `panes/`: `ExplorerPane` (search + editor), `NewNotePane` (the new-note form on its own), `CanvasPane`, `Canvas2TypPane` (a note's canvas beside its Typst document), `SourcesPane`, `LearnPane`, `GreekAlphabetPane`. They share `SearchLayout`: the search on the right, whose results offer the pane's actions (open as canvas, add to this canvas, …), and at most one overlay over the pane (`panes/overlay.ts`): a note in the editor, or the new-note form the search's "+" opens. The overlay lives in the URL (`?overlay=note:<key>` or `new`); opening one pushes a history entry, so Back closes it, and opening another from inside it replaces it. Panes import perspectives only, through `perspectives/index.ts`.
 
 `oxlint.config.ts` enforces this (eslint-plugin-boundaries). Within primitives, components and widgets, files of the same layer may share code. "Not from neighbours" is enforced between perspective slices only.
 
@@ -126,6 +126,18 @@ The backlinks come from one index per repo version, built from every note's rela
 in their text, so notes edited elsewhere count too. Explicit rows can be detached and relabelled, and the adder
 relates a picked note in either direction. Each change is written at once, to whichever note holds the relationship.
 Inline rows are edited in the text.
+
+## Learn
+
+The Learn pane (`perspectives/learn`) reviews every flashcard by FSRS, as dsl's Learn tab did. The cards come from
+`learnableCards` (`packages/client/src/learn.ts`): each card in a note's `cards`, each `flashcard@1` that is
+`card-of` a note without `cards` yet, and each `flashcard@1` of its own. A card of a note is reviewed as the facet
+`<card id>` of that note, so its state stays put when the card is folded in; a flashcard of its own as the whole note.
+`pickNext` shows a random due card, else a random new one, never the one just rated unless it's the only one; the
+card shown stays until it's rated, even if a sync changes the picks. The front, then Reveal (Space), then front and
+back with Again, Hard, Good, Easy (1–4); the counts are due · new · all. Reviews go through `saveReview` and the
+`learn` practice session. A card that's deleted leaves its `fsrs-state` note behind: nothing reads it, and deleting
+it would lose against sync, where an edit beats a delete.
 
 ## Search sidebar
 
