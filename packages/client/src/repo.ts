@@ -1,4 +1,4 @@
-import init, { WasmRepo, newId as wasmNewId, stableId as wasmStableId } from '../wasm/gestalts.js';
+import init, { WasmRepo, newId as wasmNewId, stableId as wasmStableId, stateKey as wasmStateKey } from '../wasm/gestalts.js';
 import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
 
 export type RepoSource =
@@ -211,6 +211,14 @@ export function newId(): string {
 /** The same id for the same `name` within `namespace` (uuid5), e.g. one daily note per date. */
 export function stableId(namespace: string, name: string): string {
   return wasmStableId(namespace, name);
+}
+
+/**
+ * The key of a learner-state note (`fsrs-state`, `practice-state`) for the note `target`, or one `facet` of it,
+ * so two devices rating the same card write one note.
+ */
+export function stateKey(gestalt: string, target: string, facet?: string): string {
+  return wasmStateKey(gestalt, target, facet);
 }
 
 const MIME: Record<string, string> = {

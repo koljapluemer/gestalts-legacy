@@ -29,6 +29,8 @@ export type IndexedNote = {
 export type Query = {
   /** `name@version` */
   gestalt?: string;
+  /** `name@version` of gestalts the note must not have */
+  gestaltsNone?: string[];
   tagsAll?: string[];
   tagsNone?: string[];
   keys?: string[];

@@ -16,7 +16,7 @@ apps/demo          public-facing Greek letters practice
 
 - `Storage` (port): list/read/write/delete notes by key, list/read/write blobs by name. `?Send` so browser adapters fit.
 - Adapters: `FsStorage` (disk, atomic writes), `Opfs`, `Static` (read-only, a published data folder with `index.json`), `Connector` (HTTP), `Layered` (read-only base + writable top, copy-on-write), `Memory`.
-- `Repo`: loads every note into an index (parsed YAML, gestalts, lints) and answers `Query {gestalt, tagsAll, tagsNone, keys}`.
+- `Repo`: loads every note into an index (parsed YAML, gestalts, lints) and answers `Query {gestalt, gestaltsNone, tagsAll, tagsNone, keys, where}`.
 - `merge3` / `sync`: see [connector.md](connector.md).
 - `upstream`: copy-on-write from a published deck into the user's storage, see below.
 

@@ -14,6 +14,8 @@ A note is any YAML. Conventions, all optional:
 | `id` | global uuid, normally also the file name |
 | `title` | one line |
 | `main` | the content, usually multi-line |
+| `extra` | more Markdown, shown below `main`; references in it count as in `main` |
+| `tasks` | a note about the note, e.g. what's left to do with it |
 | `aliases` | other names, list of strings |
 | `tags` | contexts the note is (not) used in; letters, digits, dashes |
 | `relationships` | list of `<uuid>` or `{to: <uuid>, label: <label>}` |

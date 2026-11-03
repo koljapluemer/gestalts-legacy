@@ -3,9 +3,12 @@ version: 1
 description: >-
   A learner's spaced-repetition state for the note it `reviews`, as a ts-fsrs (v6) card.
   Kept apart from the reviewed note so that content can stay read-only or be shared.
+  With `facet`, the state is for that one facet of the note (a cloze level, an exercise); without, for the whole note.
+  Keyed `stableId("fsrs-state", target)` or `stableId("fsrs-state", "<target>/<facet>")` (`stateKey`).
 requires_tags: [fsrs-state]
 fields:
   model: { type: string, required: true }        # e.g. FSRS-7
+  facet: { type: string }
   last_rating: { type: integer, required: true, one_of: [1, 2, 3, 4] }
   card:
     type: map

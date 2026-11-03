@@ -35,8 +35,10 @@ export function stateFromNote(n: IndexedNote): { reviews: string; state: ReviewS
   return { reviews, state: { key: n.key, lastRating: lastRating as Grade, card: card as ReviewState['card'] } };
 }
 
-export function toNoteValue(cardId: string, s: ReviewState): Json {
+/** `key`: the note's key, also its `id`; new states use `stateKey('fsrs-state', cardId)`. */
+export function toNoteValue(key: string, cardId: string, s: ReviewState): Json {
   return {
+    id: key,
     tags: ['fsrs-state'],
     relationships: [{ to: cardId, label: 'reviews' }],
     model: MODEL,

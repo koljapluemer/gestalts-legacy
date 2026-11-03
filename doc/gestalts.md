@@ -49,7 +49,7 @@ Field options:
 | `appointment@1` | tag `appointment`, `date` |
 | `link@1` | a well-formed `url` |
 | `pronunciation-card@1` | tag `pronunciation-card`, `title` (the term), blob `audio`, optional blob `image`, optional `lang` |
-| `fsrs-state@1` | tag `fsrs-state`, one relationship `reviews`, `model` (e.g. `FSRS-7`), `last_rating` 1–4, `card` (a ts-fsrs v6 card) |
+| `fsrs-state@1` | tag `fsrs-state`, one relationship `reviews`, `model` (e.g. `FSRS-7`), `last_rating` 1–4, `card` (a ts-fsrs v6 card), optional `facet` |
 | `recurring@1` | tag `recurring`, `weekday` (`mo`…`su`), optional `until` (partial date) |
 | `daily@1` | tag `daily`, `date`; keyed `stableId("daily", date)`, so one note per date across devices |
 | `project@1` / `issue@1` | tag `project` / tag `issue` with at least one `project` relationship |
@@ -58,9 +58,21 @@ Field options:
 | `source@1` | tag `source`, `title`, `citekey`, `entrytype` and biblatex fields (see [Sources](#sources)) |
 | `canvas@1` | tag `canvas`, `nodes` (each `id`, `x`, `y` and `text` or `note`), one `canvas-of` relationship |
 | `typst-document@1` | tag `typst`, `source`, `assets` (path → blob), blob `pdf` (at most one), `document-of` at most one |
+| `term@1` | tag `term`, `title` (the term), optional `lang`, `translations`, `transliteration`, `examples` (each `text`, `translation`, `credit`), `value` (a numeral's number); blobs `image`, `audio`, `doodle` at most one each; alternate spellings in `aliases` |
+| `sentence@1` | tag `sentence`, `title` (the sentence), optional `lang`, `translations`, `transcription`, `credits` (each `for`, `text`), `parts` (each `content`, `translations`, `transcription`, `examples`, `term` = a `term@1` id), `gaps` (each `word`, `at`, `distractors`), `start`/`end` in seconds with at most one `segment-of` |
+| `quote@1` | tag `quote`, `main`, optional `attribution`; may `cites` a `source@1` |
+| `country@1` | tag `country`, `title`, `code` (ISO alpha-3), optional `alpha2`, `priority`, `world_map` (map), blob `flag` at most one; `distractor` relationships to other countries |
+| `scene-object@1` | tag `scene-object`, `title`, optional `props`, `hold` (maps), blob `model` (glb) or `image` |
+| `interaction@1` | tag `interaction`, `action`, optional `effects`, `instructions` (lang → sentences); one `actor`, at most one `target` |
+| `practice-state@1` | tag `practice-state`, one `reviews`, `model` (a scheduler other than FSRS: `ebisu`, `streak`, …), `state` (map), optional `facet` |
+| `practice-session@1` | tag `practice-session`, `app` (perspective id), `started`, optional `ended` (datetimes), `active_ms`, `trials`, `events` (each with `at`); random key, one writer |
+| `settings@1` | tag `settings`, `scope` (perspective id), further fields as the scope defines; keyed `stableId("settings", scope)` |
 
 Relationship labels with a meaning: `card-of` (a flashcard extracted from a note), `canvas-of` and `on-canvas` (a canvas
-and each note on it), `document-of` and `cites` (a Typst document, its note and the sources it cites), `template-of`.
+and each note on it), `document-of` and `cites` (a Typst document or quote, its note and the sources it cites),
+`template-of`, `reviews` (learner state and the note it's for), `segment-of` (a sentence and the recording it's spoken
+in), `distractor` (a country easily confused with this one), `member` (a group and its notes), `actor` and `target`
+(an interaction and its scene objects).
 
 ## Sources
 
@@ -76,4 +88,11 @@ the Sources pane flags duplicates.
 eprint decides; else title, first author and year, loosely), merges an entry into a source, and lists the keys a Typst
 document cites. The client exposes it as `bib`.
 
+## Learner state
+
 Learner state is a separate note that `reviews` the card. It is not stored in the card itself. That way content can stay read-only (shipped in Demo's `public/`) while each learner's progress lives elsewhere.
+
+State notes (`fsrs-state@1`, `practice-state@1`) have stable keys, so two devices rating the same card write one note:
+`stateKey(gestalt, target, facet?)` in the client (`state_key` in the core), which is `stableId(gestalt, target)` or,
+for one facet of a note (a cloze level, a map exercise), `stableId(gestalt, "<target>/<facet>")`. States saved
+before this keep their random keys. Logs go in `practice-session@1` notes instead, one per session.

@@ -36,7 +36,7 @@ One plan session each, in this order. Each ends with a visual check in the app a
 
 Foundations:
 - [x] Set merge for `relationships`, `blobs`, `tags` in `merge3`
-- [ ] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
+- [x] `Query.gestaltsNone`; the gestalts of [integration-gestalts.md](integration-gestalts.md), `fsrs-state` `facet`
 - [ ] Lazy fold-in: `canvas@2`, `template@2`, `cards`, retiring the attached notes
 - [ ] A repo per deck, so big decks don't load into one index
 - [ ] Shared learning layer: FSRS by facet, `practice-session` writer (trials, active time), cross-app stats page

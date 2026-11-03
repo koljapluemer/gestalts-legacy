@@ -5,7 +5,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gestalts_core::{Gestalts, Note, Query};
+use gestalts_core::{Gestalts, Note};
 use gestalts_plugin_host::{PluginBundle, Runtime, Trigger};
 use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
@@ -212,7 +212,7 @@ impl PluginHost {
             let id = {
                 let p = plugin.lock().await;
                 let matched = p.bundle.manifest.worker.triggers.iter().any(|t| match t {
-                    Trigger::Change { query } => query_matches(query, &note, &gestalts),
+                    Trigger::Change { query } => query.matches(&note, &gestalts),
                     Trigger::Schedule { .. } => false,
                 });
                 matched.then(|| p.bundle.manifest.id.clone())
@@ -265,14 +265,6 @@ impl PluginHost {
         for p in plugins { let p = p.lock().await; if p.token == token { return Some(p.bundle.manifest.worker.access.clone()); } }
         None
     }
-}
-
-fn query_matches(query: &Query, note: &Note, gestalts: &[String]) -> bool {
-    query.gestalt.as_ref().is_none_or(|g| gestalts.contains(g))
-        && query.tags_all.iter().all(|t| note.has_tag(t))
-        && !query.tags_none.iter().any(|t| note.has_tag(t))
-        && query.keys.as_ref().is_none_or(|keys| keys.contains(&note.key))
-        && query.where_.iter().all(|(field, value)| note.get(field) == Some(value))
 }
 
 /// The plugins shipped in the repo's `plugins/`, compiled into the binary so an installed connector needs no checkout.

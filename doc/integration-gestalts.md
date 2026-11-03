@@ -1,14 +1,15 @@
 # Gestalts for integrating dsl and sam-learns-things
 
-A proposal: the gestalts to add so that every dsl tab and every sam-learns-things mini app can run on notes with all
-of its features. dsl notes already migrate (`~/SCRIPTS/143_dsl_to_gestalts`);
+The gestalts that let every dsl tab and every sam-learns-things mini app run on notes with all of its features. The
+gestalts below are defined (shapes in [gestalts.md](gestalts.md)); the `renders` and `viz` keys get defined with the
+Portfolio and Viz blocks steps of [future.md](future.md#plans). dsl notes already migrate (`~/SCRIPTS/143_dsl_to_gestalts`);
 sam-learns-things has no migration yet.
 
 ## Principles
 
 - **Content and learner state are separate notes**, as `fsrs-state@1` already does. Content ships as read-only decks
   (copy-on-write, like the Demo). State and logs are written by one learner.
-- **State notes have stable keys**: `stableId(<gestalt>, <target id>[, <facet>])`, as `daily@1` does. Then two devices
+- **State notes have stable keys**: `stateKey(<gestalt>, <target id>[, <facet>])`, as `daily@1` does. Then two devices
   rating the same card write one note, not two.
 - **Merge is per top-level key**, so append-heavy data (logs) goes into notes that only one device writes: one per
   session, never one per day.
@@ -40,14 +41,14 @@ become plain deck notes (title, explanation in `main`), so `practice-state@1` ha
 
 ## Changes to existing gestalts and conventions
 
-- `fsrs-state@1`: add an optional `facet`, with the key above, for cards that are one facet of a note. Examples: a
+- `fsrs-state@1`: an optional `facet`, with the key above, for cards that are one facet of a note. Examples: a
   quote's cloze level, a world-map exercise (`find-in-neighborhood:2`), a top-vocab level, an infinitesentences gloss,
   a tprboard instruction text. Notes without `facet` keep their meaning. Migrating py-fsrs (dsl) and older ts-fsrs
   cards (sam-learns) means converting them to the v6 card.
 - `pronunciation-card@1` already fits hebrewscript and minimal-pairs clips (`title` the transcript, blob `audio`,
   `lang`); minimal-pairs' `nativeScript` goes in `aliases`.
 - `flashcard@1` covers just-flashcards as is; cards in other notes become a `cards` key ([future.md](future.md#fewer-attached-notes)).
-- [data-format.md](data-format.md) gets two conventional fields that dsl notes already carry after migration: `extra`
+- [data-format.md](data-format.md) has two conventional fields that dsl notes already carry after migration: `extra`
   (more Markdown, inline references count as in `main`) and `tasks` (a note about the note, for the Tasks tab).
 
 ## dsl tabs
@@ -60,7 +61,7 @@ become plain deck notes (title, explanation in `main`), so `practice-state@1` ha
 | Graph | relationships; pins in `settings@1`; hiding by tags `no-graph` |
 | Viz blocks | `viz` key |
 | Tasks | `tasks` field, plus notes with lints |
-| Explorations, Goals, Tags, Suggest, Queue, Float, Questions, Desk | tags and relationships only. Hiding needs `gestaltsNone` in `Query` (e.g. Queue leaves out appointments, sources and dailies) |
+| Explorations, Goals, Tags, Suggest, Queue, Float, Questions, Desk | tags and relationships only. Hiding uses `gestaltsNone` in `Query` (e.g. Queue leaves out appointments, sources and dailies) |
 
 Not gestalts but connector plugins: semantic search (Ollama embeddings, a cache), the Questions LLM picker, PDF export
 and collages (Chromium), the continuous `.bib` / site / portfolio exports.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { blob, str, useBlobUrl, type IndexedNote, type Query } from '@gestalts/client';
+import { blob, stateKey, str, useBlobUrl, type IndexedNote, type Query } from '@gestalts/client';
 import { definePerspective } from '../define/definePerspective';
 import { getScheduler, isStruggling, nextCard, rate, Rating, stateFromNote, toNoteValue, type Grade, type ReviewState } from './schedule';
 
@@ -50,7 +50,9 @@ export const GreekAlphabet = definePerspective<{ cards: Query; reviews: Query },
       const now = new Date();
       const prev = states.get(card.id);
       const next = rate(await getScheduler(), prev, grade, now);
-      const saved = await repo.putValue(prev?.key, toNoteValue(card.id, next));
+      // states saved before stable keys keep their random key
+      const key = prev?.key ?? stateKey('fsrs-state', card.id);
+      const saved = await repo.putValue(key, toNoteValue(key, card.id, next));
       const updated = new Map(states).set(card.id, { ...next, key: saved.key });
       const following = nextCard(data.cards, updated, card.id, now);
       setCurrent({ id: following?.id ?? null, last: card.id, picked: true });

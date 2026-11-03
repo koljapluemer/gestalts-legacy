@@ -82,7 +82,7 @@ impl WasmRepo {
         repo.load().await.map_err(err)
     }
 
-    /// `query`: `{gestalt?, tagsAll?, tagsNone?, keys?}`
+    /// `query`: `{gestalt?, gestaltsNone?, tagsAll?, tagsNone?, keys?, where?}`
     pub fn query(&self, query: JsValue) -> Result<JsValue, JsError> {
         let q: Query = if query.is_undefined() || query.is_null() {
             Query::default()
@@ -175,6 +175,11 @@ pub fn new_id() -> String {
 #[wasm_bindgen(js_name = stableId)]
 pub fn stable_id(namespace: &str, name: &str) -> String {
     gestalts_core::stable_id(namespace, name)
+}
+
+#[wasm_bindgen(js_name = stateKey)]
+pub fn state_key(gestalt: &str, target: &str, facet: Option<String>) -> String {
+    gestalts_core::state_key(gestalt, target, facet.as_deref())
 }
 
 /// BibTeX text as sources: `[{source, warnings}]`.

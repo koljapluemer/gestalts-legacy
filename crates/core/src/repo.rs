@@ -16,12 +16,26 @@ use crate::storage::{Result, Storage, check_key};
 pub struct Query {
     /// `name@version`
     pub gestalt: Option<String>,
+    /// `name@version` of gestalts the note must not have
+    pub gestalts_none: Vec<String>,
     pub tags_all: Vec<String>,
     pub tags_none: Vec<String>,
     pub keys: Option<Vec<String>>,
     /// Exact matches on top-level scalar fields.
     #[serde(rename = "where")]
     pub where_: BTreeMap<String, Value>,
+}
+
+impl Query {
+    /// Whether a note with these gestalts is one the query asks for.
+    pub fn matches(&self, note: &Note, gestalts: &[String]) -> bool {
+        self.gestalt.as_ref().is_none_or(|g| gestalts.contains(g))
+            && !self.gestalts_none.iter().any(|g| gestalts.contains(g))
+            && self.tags_all.iter().all(|t| note.has_tag(t))
+            && !self.tags_none.iter().any(|t| note.has_tag(t))
+            && self.keys.as_ref().is_none_or(|ks| ks.contains(&note.key))
+            && self.where_.iter().all(|(k, v)| note.get(k) == Some(v))
+    }
 }
 
 /// A note together with what the core knows about it, as handed to frontends.
@@ -87,11 +101,7 @@ impl<S: Storage> Repo<S> {
         self.index
             .borrow()
             .values()
-            .filter(|n| q.gestalt.as_ref().is_none_or(|g| n.gestalts.contains(g)))
-            .filter(|n| q.tags_all.iter().all(|t| n.note.has_tag(t)))
-            .filter(|n| !q.tags_none.iter().any(|t| n.note.has_tag(t)))
-            .filter(|n| q.keys.as_ref().is_none_or(|ks| ks.contains(&n.note.key)))
-            .filter(|n| q.where_.iter().all(|(k, v)| n.note.get(k) == Some(v)))
+            .filter(|n| q.matches(&n.note, &n.gestalts))
             .cloned()
             .collect()
     }
@@ -144,6 +154,15 @@ pub fn stable_id(namespace: &str, name: &str) -> String {
     uuid::Uuid::new_v5(&ns, name.as_bytes()).to_string()
 }
 
+/// The key of a learner-state note (`fsrs-state`, `practice-state`) for `target`, or for one `facet` of it,
+/// so two devices rating the same card write one note. Keys can't contain `/`, so the joined name is unambiguous.
+pub fn state_key(gestalt: &str, target: &str, facet: Option<&str>) -> String {
+    match facet {
+        Some(f) => stable_id(gestalt, &format!("{target}/{f}")),
+        None => stable_id(gestalt, target),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +181,9 @@ mod tests {
             let keys: Vec<_> = repo.query(&q).into_iter().map(|n| n.note.key).collect();
             assert_eq!(keys, vec!["a"]);
             assert_eq!(repo.query(&Query::default()).len(), 3);
+            let q = Query { gestalts_none: vec!["flashcard@1".into()], ..Default::default() };
+            let keys: Vec<_> = repo.query(&q).into_iter().map(|n| n.note.key).collect();
+            assert_eq!(keys, vec!["c"]);
 
             let mut m = Mapping::new();
             m.insert("title".into(), "new".into());
@@ -178,5 +200,8 @@ mod tests {
     fn stable_ids() {
         assert_eq!(stable_id("x", "δελφίς"), stable_id("x", "δελφίς"));
         assert_ne!(stable_id("x", "a"), stable_id("x", "b"));
+        assert_eq!(state_key("fsrs-state", "c", None), stable_id("fsrs-state", "c"));
+        assert_eq!(state_key("fsrs-state", "c", Some("level:2")), stable_id("fsrs-state", "c/level:2"));
+        assert_ne!(state_key("fsrs-state", "c", Some("a")), state_key("practice-state", "c", Some("a")));
     }
 }

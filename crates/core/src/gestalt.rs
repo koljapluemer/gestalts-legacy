@@ -292,6 +292,15 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../gestalts/source/v1.yml"),
     include_str!("../../../gestalts/canvas/v1.yml"),
     include_str!("../../../gestalts/typst-document/v1.yml"),
+    include_str!("../../../gestalts/term/v1.yml"),
+    include_str!("../../../gestalts/sentence/v1.yml"),
+    include_str!("../../../gestalts/quote/v1.yml"),
+    include_str!("../../../gestalts/country/v1.yml"),
+    include_str!("../../../gestalts/scene-object/v1.yml"),
+    include_str!("../../../gestalts/interaction/v1.yml"),
+    include_str!("../../../gestalts/practice-state/v1.yml"),
+    include_str!("../../../gestalts/practice-session/v1.yml"),
+    include_str!("../../../gestalts/settings/v1.yml"),
 ];
 
 impl Gestalts {
@@ -424,5 +433,64 @@ mod tests {
         assert_eq!(g.of(&s), vec!["link@1", "source@1"], "{:?}", g.lint(&s));
         let t = note("tags: [typst]\nsource: \"= Hi\"\nassets: {/images/a.webp: 0123456789abcdef.webp}\nrelationships: [{to: h, label: document-of}]\n");
         assert_eq!(g.of(&t), vec!["typst-document@1"], "{:?}", g.lint(&t));
+    }
+
+    #[test]
+    fn every_definition_file_is_builtin() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gestalts");
+        let g = Gestalts::builtin();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            for file in std::fs::read_dir(entry.path()).unwrap() {
+                let file = file.unwrap().file_name().into_string().unwrap();
+                let version = file.strip_prefix('v').and_then(|f| f.strip_suffix(".yml")).expect("gestalts/<name>/v<N>.yml");
+                let id = format!("{}@{version}", entry.file_name().to_string_lossy());
+                assert!(g.get(&id).is_some(), "{id} is missing from BUILTIN");
+            }
+        }
+    }
+
+    #[track_caller]
+    fn has(g: &Gestalts, raw: &str, id: &str) {
+        let n = note(raw);
+        assert!(g.of(&n).contains(&id.to_string()), "{id}: {:?}", g.lint(&n));
+    }
+
+    #[track_caller]
+    fn lint_paths(g: &Gestalts, raw: &str) -> Vec<String> {
+        g.lint(&note(raw)).into_iter().map(|l| l.path).collect()
+    }
+
+    #[test]
+    fn integration_gestalts() {
+        let g = Gestalts::builtin();
+        has(&g, "tags: [term]\ntitle: كتاب\nlang: ar\ntranslations: [book]\ntransliteration: kitāb\nexamples:\n  - {text: هذا كتاب, translation: this is a book}\naliases: [كتب]\nblobs: [{label: audio, file: a.mp3}]\n", "term@1");
+        has(&g, "tags: [term]\ntitle: ٣\nvalue: 3\n", "term@1");
+        assert_eq!(lint_paths(&g, "tags: [term]\ntitle: x\nexamples: [{translation: y}]\nblobs: [{label: image, file: a}, {label: image, file: b}]\n"), vec!["examples.0.text", "blobs.image"]);
+
+        has(&g, "tags: [sentence]\ntitle: Ich sehe den Hund.\nlang: de\ntranslations: [I see the dog.]\nparts:\n  - {content: Ich, translations: [I], term: t1}\n  - {content: sehe}\ngaps: [{word: den, at: 2, distractors: [der]}]\ncredits: [{for: audio, text: Tatoeba}]\nstart: 3.5\nend: 5\nrelationships: [{to: v, label: segment-of}]\n", "sentence@1");
+        assert_eq!(lint_paths(&g, "tags: [sentence]\ntitle: x\ngaps: [{at: -1}]\nstart: -2\n"), vec!["gaps.0.at", "gaps.0.word", "start"]);
+
+        has(&g, "tags: [quote]\nmain: Brevity is the soul of wit.\nattribution: Shakespeare\nrelationships: [{to: s, label: cites}]\n", "quote@1");
+        assert_eq!(lint_paths(&g, "tags: [quote]\nattribution: x\n"), vec!["main"]);
+
+        has(&g, "tags: [country]\ntitle: Germany\ncode: DEU\nalpha2: DE\npriority: 1\nworld_map: {zoom: 4}\nblobs: [{label: flag, file: f.svg}]\nrelationships: [{to: aut, label: distractor}]\n", "country@1");
+        assert_eq!(lint_paths(&g, "tags: [country]\ntitle: Germany\n"), vec!["code"]);
+
+        has(&g, "tags: [scene-object]\ntitle: cup\nprops: {color: red}\nblobs: [{label: model, file: cup.glb}]\n", "scene-object@1");
+        has(&g, "tags: [interaction]\naction: give\neffects: {receiver: happy}\ninstructions: {de: [Gib ihm die Tasse.]}\nrelationships: [{to: a, label: actor}, {to: b, label: target}]\n", "interaction@1");
+        assert_eq!(lint_paths(&g, "tags: [interaction]\naction: give\nrelationships: [{to: b, label: target}, {to: c, label: target}]\n"), vec!["relationships.actor", "relationships.target"]);
+
+        has(&g, "tags: [practice-state]\nmodel: ebisu\nfacet: de\nstate: {alpha: 3, beta: 3, t: 24}\nrelationships: [{to: c, label: reviews}]\n", "practice-state@1");
+        assert_eq!(lint_paths(&g, "tags: [practice-state]\nmodel: streak\n"), vec!["state", "relationships.reviews"]);
+
+        has(&g, "tags: [practice-session]\napp: hebrew-script\nstarted: 2026-11-03T10:00:00Z\nended: 2026-11-03T10:12:00Z\nactive_ms: 540000\ntrials: 42\nevents:\n  - {at: 2026-11-03T10:00:05Z, card: c, correct: true}\n", "practice-session@1");
+        assert_eq!(lint_paths(&g, "tags: [practice-session]\napp: x\nstarted: 2026-11-03T10:00:00Z\nevents: [{card: c}]\ntrials: -1\n"), vec!["events.0.at", "trials"]);
+
+        has(&g, "tags: [settings]\nscope: daily\nsentence_goal: 10\n", "settings@1");
+        assert_eq!(lint_paths(&g, "tags: [settings]\n"), vec!["scope"]);
+
+        let faceted = "tags: [fsrs-state]\nfacet: cloze:2\nrelationships: [{to: q, label: reviews}]\nmodel: FSRS-7\nlast_rating: 3\ncard: {dueAt: 2026-01-05T18:39:55.164Z, stability: 1, difficulty: 5, state: 1, reps: 1, lapses: 0}\n";
+        has(&g, faceted, "fsrs-state@1");
     }
 }
