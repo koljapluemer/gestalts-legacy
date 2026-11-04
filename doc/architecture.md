@@ -12,6 +12,8 @@ apps/gestalter     main app: switch between all panes
 apps/demo          public-facing Greek letters practice
 ```
 
+The planned changes to merging, deletes and plugins are in [foundations.md](foundations.md).
+
 ## Core (Rust, native and wasm)
 
 - `Storage` (port): list/read/write/delete notes by key, list/read/write blobs by name. `?Send` so browser adapters fit.
