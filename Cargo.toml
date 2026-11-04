@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/fs", "crates/wasm", "crates/plugin-host", "crates/connector"]
+members = ["crates/merge", "crates/core", "crates/fs", "crates/wasm", "crates/plugin-host", "crates/connector"]
 
 [workspace.package]
 edition = "2024"
@@ -8,6 +8,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 gestalts-core = { path = "crates/core" }
+gestalts-merge = { path = "crates/merge" }
 gestalts-fs = { path = "crates/fs" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

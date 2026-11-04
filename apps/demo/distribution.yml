@@ -1,0 +1,4 @@
+# The public Demo: the host with one plugin, shown alone
+plugins: [greek-alphabet]
+default_panes: [greek-alphabet/practice]
+install_ui: false

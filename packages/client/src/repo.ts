@@ -1,18 +1,26 @@
 import init, {
-  WasmRepo, cardId as wasmCardId, contentHash as wasmContentHash, merge3 as wasmMerge3, newId as wasmNewId, stableId as wasmStableId,
-  stateKey as wasmStateKey,
+  WasmRepo, bibCitedKeys, bibMatches, bibMerge, bibModel, bibParse, bibUniqueCitekey, bibWrite, cardId as wasmCardId,
+  contentHash as wasmContentHash, newId as wasmNewId, stableId as wasmStableId, stateKey as wasmStateKey,
 } from '../wasm/gestalts.js';
+import {
+  ServiceClient, logger, provideNatives, type GestaltDef, type IndexedNote, type Json, type MergeResult, type Query, type Repo as Port,
+  type SyncReport, type UpstreamReport,
+} from '@gestalts/sdk';
 import { coalesce } from './coalesce';
-import { logger } from './log';
-import type { GestaltDef, IndexedNote, Json, Query, SyncReport, UpstreamReport } from './types';
 
 const log = logger('repo');
 
-export type RepoSource =
-  /** notes live in OPFS under `dir` */
-  | { kind: 'opfs'; dir: string }
-  /** read-only notes published at `staticBase` (a URL), copied into OPFS under `dir` once the user's notes reference them */
-  | { kind: 'layered'; staticBase: string; dir: string };
+/** A read-only deck published at `url` (a folder with `index.json`), under its `source` id and earlier ones. */
+export type DeckSource = { source: string; aliases?: string[]; url: string };
+
+export type RepoSource = {
+  /** the user's notes live in OPFS under `dir` */
+  dir: string;
+  /** read-only decks under them; a deck note is copied into `dir` once the user's notes reference it */
+  decks?: DeckSource[];
+  /** gestalt definitions (YAML) beyond the core's, from plugins */
+  gestalts?: string[];
+};
 
 export type ConnectorStatus = {
   url: string | null;
@@ -20,29 +28,39 @@ export type ConnectorStatus = {
   error?: string;
   lastSync?: Date;
   lastReport?: SyncReport;
-  /** conflict notes created since connecting */
+  /** `conflict@1` notes recorded since connecting */
   conflicts: string[];
   /** the folder the connector serves, as of the last sync */
   folder?: string;
 };
 
-/** A versioned optional HTTP service exposed by a connector-hosted plugin. */
-export class ServiceClient {
-  constructor(readonly baseUrl: string, readonly id: string) {}
-
-  request(path = '', init?: RequestInit): Promise<Response> {
-    const suffix = path.replace(/^\//, '');
-    return fetch(`${this.baseUrl}/services/${encodeURIComponent(this.id)}/${suffix}`, init);
-  }
-}
-
 let ready: Promise<unknown> | null = null;
+
+/** The core's ids, hashes and BibTeX, for `@gestalts/sdk`; usable once the wasm is loaded. */
+function provideCoreNatives() {
+  provideNatives({
+    newId: () => wasmNewId(),
+    stableId: (ns, name) => wasmStableId(ns, name),
+    stateKey: (gestalt, target, facet) => wasmStateKey(gestalt, target, facet),
+    cardId: (front) => wasmCardId(front),
+    contentHash: (text) => wasmContentHash(text),
+    bib: {
+      parse: (text) => bibParse(text),
+      write: (sources) => bibWrite(sources),
+      matches: (entry, existing, limit) => bibMatches(entry, existing, limit),
+      merge: (current, incoming, take) => bibMerge(current, incoming, take),
+      uniqueCitekey: (key, taken) => bibUniqueCitekey(key, taken),
+      citedKeys: (typst) => bibCitedKeys(typst),
+      model: () => bibModel(),
+    },
+  });
+}
 
 /**
  * The notes and blobs an app works with, backed by the Rust core.
  * Subscribe to learn about any change (own writes or a sync); `version` increases on each.
  */
-export class Repo {
+export class Repo implements Port {
   private listeners = new Set<() => void>();
   private queue: Promise<unknown> = Promise.resolve();
   /** mutations queued or running, for the log */
@@ -53,16 +71,21 @@ export class Repo {
   private syncTimer: ReturnType<typeof setTimeout> | undefined;
   private pollTimer: ReturnType<typeof setInterval> | undefined;
   version = 0;
+  /**
+   * Settles once the first sync after opening is done (or failed), right away without a connector. Seed notes (default
+   * panes, installs) only after it, so a new device doesn't recreate what another one deleted.
+   */
+  firstSync: Promise<void> = Promise.resolve();
 
   private constructor(private wasm: WasmRepo, private storageKey: string) {}
 
   static async open(source: RepoSource): Promise<Repo> {
-    const span = log.span('open', { kind: source.kind, dir: source.dir });
+    const span = log.span('open', { dir: source.dir, decks: (source.decks ?? []).map((d) => d.source) });
     let wasm: WasmRepo;
     try {
-      ready ??= init();
+      ready ??= init().then(provideCoreNatives);
       await ready;
-      wasm = source.kind === 'opfs' ? await WasmRepo.opfs(source.dir) : await WasmRepo.layered(source.staticBase, source.dir);
+      wasm = await WasmRepo.open(source.dir, source.decks ?? [], source.gestalts ?? []);
     } catch (e) {
       span.fail(e);
       throw e;
@@ -71,7 +94,7 @@ export class Repo {
     const repo = new Repo(wasm, `gestalts-connector:${source.dir}`);
     let saved: string | null = null;
     try { saved = localStorage.getItem(repo.storageKey); } catch { /* no storage: start disconnected */ }
-    if (saved) void repo.connect(saved);
+    repo.firstSync = saved ? repo.connect(saved).catch(() => undefined) : Promise.resolve();
     return repo;
   }
 
@@ -144,6 +167,11 @@ export class Repo {
     return this.wasm.inspect(key, raw) as IndexedNote;
   }
 
+  /** What writing `value` under `key` would index as, without saving it. */
+  inspectValue(key: string | undefined, value: Json): IndexedNote {
+    return this.wasm.inspectValue(key, JSON.stringify(value)) as IndexedNote;
+  }
+
   async putRaw(key: string, raw: string): Promise<IndexedNote> {
     const n = await this.serial('putRaw', () => this.wasm.putRaw(key, raw) as Promise<IndexedNote>, { key });
     this.afterWrite();
@@ -157,9 +185,32 @@ export class Repo {
     return n;
   }
 
-  async delete(key: string): Promise<void> {
-    await this.serial('delete', () => this.wasm.delete(key), { key });
+  /**
+   * Deletes a note: writes its tombstone, so the delete syncs, and the tombstones of notes that die with it (learner
+   * state of a deleted card). Returns every key deleted. Writing the note again brings it back.
+   */
+  async delete(key: string): Promise<string[]> {
+    const keys = await this.serial('delete', () => this.wasm.delete(key) as Promise<string[]>, { key });
     this.afterWrite();
+    return keys;
+  }
+
+  /** The keys of the notes copied from the deck `source` (or one of its `aliases`). */
+  copiesOf(source: string, aliases: string[] = []): Promise<string[]> {
+    return this.wasm.copiesOf(source, aliases) as Promise<string[]>;
+  }
+
+  /** Whether `key` was deleted (is a tombstone); `get` returns nothing for it. */
+  isDeleted(key: string): boolean {
+    return this.wasm.isDeleted(key);
+  }
+
+  /**
+   * Three-way merge of one note's text as a sync does it, by the note's gestalts' merge rules. `text` is null when the
+   * note is absent; `conflicts` lists what no rule settled (the text keeps one side of each).
+   */
+  merge3(key: string, base: string | null, local: string | null, remote: string | null): MergeResult {
+    return this.wasm.merge3(key, base ?? undefined, local ?? undefined, remote ?? undefined) as MergeResult;
   }
 
   async readBlob(name: string): Promise<Uint8Array | undefined> {
@@ -215,6 +266,13 @@ export class Repo {
     await this.sync();
   }
 
+  /** Stops syncing without forgetting the connector, e.g. before opening the same folder again. */
+  close() {
+    clearInterval(this.pollTimer);
+    clearTimeout(this.syncTimer);
+    this.setStatus({ url: null, state: 'off' });
+  }
+
   disconnect() {
     log.info('disconnect');
     try { localStorage.removeItem(this.storageKey); } catch { /* nothing remembered */ }
@@ -234,8 +292,7 @@ export class Repo {
     if (!url) return;
     this.setStatus({ state: 'syncing' });
     try {
-      const tag = new Date().toISOString().replace(/[:.]/g, '-');
-      const report = await this.serial('sync', () => this.wasm.sync(url, tag) as Promise<SyncReport>);
+      const report = await this.serial('sync', () => this.wasm.sync(url) as Promise<SyncReport>);
       if (this.status.url !== url) return report;
       log.info('sync done', {
         pushed: report.pushed.length, pulled: report.pulled.length, blobsPulled: report.blobs_pulled.length, conflicts: report.conflicts.length,
@@ -253,44 +310,6 @@ export class Repo {
       this.setStatus({ state: 'error', error: e instanceof Error ? e.message : String(e) });
     }
   }
-}
-
-export function newId(): string {
-  return wasmNewId();
-}
-
-/** The same id for the same `name` within `namespace` (uuid5), e.g. one daily note per date. */
-export function stableId(namespace: string, name: string): string {
-  return wasmStableId(namespace, name);
-}
-
-/**
- * The key of a learner-state note (`fsrs-state`, `practice-state`) for the note `target`, or one `facet` of it,
- * so two devices rating the same card write one note.
- */
-export function stateKey(gestalt: string, target: string, facet?: string): string {
-  return wasmStateKey(gestalt, target, facet);
-}
-
-/** What identifies a card within its note: dsl's `card_id`, 12 hex digits of the sha1 of its trimmed front. */
-export function cardId(front: string): string {
-  return wasmCardId(front);
-}
-
-/** The hashing `fold` needs, from the core. */
-export const hashing = { cardId: (front: string) => cardId(front), contentHash: (text: string) => contentHash(text) };
-
-/** Hex sha256 of a text. */
-export function contentHash(text: string): string {
-  return wasmContentHash(text);
-}
-
-/**
- * Three-way merge of one note's text, as a sync does it (per top-level key; `relationships`, `blobs`, `tags` as sets).
- * `text` is null for a deletion; `conflict` is the remote text when part of it lost to local.
- */
-export function merge3(base: string | null, local: string | null, remote: string | null): { text: string | null; conflict: string | null } {
-  return wasmMerge3(base ?? undefined, local ?? undefined, remote ?? undefined) as { text: string | null; conflict: string | null };
 }
 
 const MIME: Record<string, string> = {

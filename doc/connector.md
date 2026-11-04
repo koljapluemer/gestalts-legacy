@@ -46,9 +46,11 @@ under `gestalts` (or `gestalts-<profile>`):
 
 ## Plugins
 
-Built-in plugins (the repo's `plugins/`, plus the Python SDK they use) are compiled into the binary and unpacked on
-start. Plugins you add go in the data folder's `plugins/`. `--plugins-dir` replaces both, which is useful when
-developing plugins.
+A plugin (`plugins/<id>/plugin.yml`, schema 2; see [architecture.md](architecture.md#plugins)) may have a worker.
+The connector hosts those workers, and loads every plugin's gestalts for its lints, triggers and access checks. The
+built-in plugins (their manifests, gestalts and workers, plus the Python SDK; not their UI or decks) are compiled into
+the binary and unpacked on start. Plugins you add go in the data folder's `plugins/`. `--plugins-dir` replaces
+both, which is useful when developing plugins (`mise run dev`, `lint-data` and `publish-data` use the repo's).
 
 Workers are Python projects run in locked uv environments: `uv sync --locked`, then the environment's own executable,
 which gets scoped, process-lifetime credentials. The connector uses `GESTALTS_UV`, else a uv ≥ 0.9 on `PATH`, else it
@@ -81,9 +83,10 @@ is every request a web page can make.
 |---|---|
 | `GET /health` | `{app, version, folder: {id, path} \| null}` |
 | `GET /notes` | `[{key, text}]` — all notes |
-| `GET/PUT/DELETE /notes/{key}` | raw YAML text |
+| `GET/PUT/DELETE /notes/{key}` | raw YAML text; `DELETE` writes the note's tombstone |
 | `GET /blobs` | names |
-| `GET/PUT /blobs/{name}` | bytes |
+| `GET/PUT/DELETE /blobs/{name}` | bytes; workers can't delete |
+| `POST /blobs/collect` | collects unreferenced blobs (above): `{deleted}` |
 | `GET /control/status`, `POST /control/folder {path}`, `POST /control/show`, `POST /control/quit` | the connector's own window only (see above) |
 
 ## Sync
@@ -95,16 +98,29 @@ The apps sync their writable OPFS notes with the folder at these times:
 
 At most one sync runs, and at most one more waits (`coalesce`, `packages/client/src/coalesce.ts`): requests while one is already waiting join it. Syncs and writes share one queue, so piled-up syncs would make every write wait. After a sync only the notes it wrote locally (pulled, conflict notes, upstream copies) are re-read into the index. The debug log's `sync done` lists the note counts and how long each step took.
 
-Each side is compared with a **base**: the state after the last sync, stored in OPFS per connector URL and folder id. Each note is then merged:
+Each side is compared with a **base**: the state after the last sync, stored in OPFS per connector URL and folder id.
+Each note is then merged by `merge_note` (`crates/core/src/merge.rs`) with the engine in `crates/merge`, which is
+symmetric: two devices merging the same states get the same result, whichever is local.
 
-- Only one side changed since the base: take that side, including deletes.
-- Both sides changed, and both are YAML maps: merge per top-level key. A key changed on both sides is a conflict, and the local version wins.
-  - Except `relationships`, `blobs` and `tags`, merged as sets: an item either side added is kept, an item either side removed is dropped. Local order comes first, then remote additions. Items are compared whole, so a label changed differently on both sides leaves both items.
-- Both sides changed in some other way (unparseable, not maps, or created on both sides): the local version wins, and it counts as a conflict.
-- One side deleted and the other edited: the edit wins.
+- Only one side changed since the base: take that side.
+- A note missing on one side while the base has it was removed by hand: that counts as a delete (a tombstone).
+- A delete against a concurrent edit: the delete wins, and the edit is kept as a conflict, so it can be restored.
+  Writing a note over its tombstone brings it back.
+- Both sides changed: merged by the note's policy. The default: `tags`, `relationships` and `blobs` as sets (an item
+  either side added is kept, one either side removed is dropped); `main`, `extra` and `tasks` line by line; every
+  other key per key, recursing. Gestalts add their own rules ([gestalts.md](gestalts.md#merge)), e.g. the later
+  review of a card wins as a whole.
+- A value both changed differently that no rule settles, or a note that doesn't parse as a map: the side whose value
+  sorts greater is kept, and the conflict is recorded as a `conflict@1` note on both sides
+  ([gestalts.md](gestalts.md#conflicts)). The note editor and the connector settings list them: keep a side, or edit.
 
-On a conflict the remote text is saved as the note `<key>.conflict-<timestamp>` on both sides, and the connector settings list it. Blobs are only ever copied to the side that lacks them. They are never merged or deleted.
+Blobs are content-addressed, so they're never merged. A blob goes to the side that lacks it only if a merged note
+uses it. After each successful sync, the app collects its own unreferenced blobs and asks the connector to collect
+the folder's (`POST /blobs/collect`). A blob is deleted only after it stayed unreferenced for 7 days and 3
+collections; the manifest of when each was first seen unreferenced is `.gestalts/blob-gc.json` in the folder (OPFS
+`<dir>-blob-gc` in the browser). "Referenced" means listed in `blobs` by a note that isn't a tombstone, or held by a
+conflict record; deck blobs are never collected.
 
 Caveats:
-- The Demo pulls every note and blob in the folder into its OPFS layer. Of the shipped words, only those the learner rated (and their blobs) are in that layer, so only those reach the folder.
+- The Demo pulls every note in the folder, and the blobs they use, into its OPFS layer. Of the shipped words, only those the learner rated (and their blobs) are in that layer, so only those reach the folder.
 - A Demo hosted on a public origin that calls `localhost` runs into Chrome's Private Network Access rules. The connector does answer the preflight, but the prototype is only tested on local origins.

@@ -10,4 +10,4 @@ fields:
   facet: { type: string }
   state: { type: map, required: true }
 relationships:
-  reviews: { min: 1, max: 1 }
+  reviews: { min: 1, max: 1, dies_with_target: true }

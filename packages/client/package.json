@@ -2,9 +2,19 @@
   "name": "@gestalts/client",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -p ." },
-  "dependencies": { "ts-fsrs": "6.0.0" },
-  "peerDependencies": { "react": "19.3.1" },
-  "devDependencies": { "react": "19.3.1" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@gestalts/sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "19.3.1"
+  },
+  "devDependencies": {
+    "react": "19.3.1"
+  }
 }

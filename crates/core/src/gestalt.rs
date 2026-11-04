@@ -29,6 +29,9 @@ pub struct GestaltDef {
     pub blobs: BTreeMap<String, Count>,
     #[serde(default)]
     pub relationships: BTreeMap<String, Count>,
+    /// how its notes merge in sync (`gestalts_merge::Policy::parse`); validated on load
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -51,6 +54,9 @@ pub struct FieldRule {
     /// for `type: list`: the rule every item follows
     #[serde(default)]
     pub items: Option<Box<FieldRule>>,
+    /// for `type: map`: the rule every value follows (for maps keyed by data, like typst `assets`)
+    #[serde(default)]
+    pub values: Option<Box<FieldRule>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq)]
@@ -76,6 +82,8 @@ pub enum FieldType {
     /// a list; `items` checks each element
     List,
     Map,
+    /// the name of a blob; every blob a note uses this way must also be listed in its `blobs`
+    Blob,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -85,6 +93,9 @@ pub struct Count {
     pub min: Option<usize>,
     #[serde(default)]
     pub max: Option<usize>,
+    /// for relationships: a note whose target is deleted is deleted too (learner state of a deleted card)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dies_with_target: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -99,6 +110,11 @@ pub struct Lint {
 impl GestaltDef {
     pub fn id(&self) -> String {
         format!("{}@{}", self.name, self.version)
+    }
+
+    /// The `merge:` rules, if any. Definitions are validated on load, so a broken one can't reach here.
+    pub fn merge_policy(&self) -> Option<gestalts_merge::Policy> {
+        self.merge.as_ref().and_then(|m| gestalts_merge::Policy::parse(m).ok())
     }
 
     pub fn is_candidate(&self, note: &Note) -> bool {
@@ -148,6 +164,7 @@ fn check_field(path: &str, v: Option<&Value>, rule: &FieldRule, lint: &mut impl 
         FieldType::StringList => v.as_sequence().is_some_and(|s| s.iter().all(Value::is_string)),
         FieldType::List => v.is_sequence(),
         FieldType::Map => v.is_mapping(),
+        FieldType::Blob => v.as_str().is_some_and(crate::note::valid_key),
     };
     if !ok {
         fail(lint, type_name(rule.ty));
@@ -177,6 +194,11 @@ fn check_field(path: &str, v: Option<&Value>, rule: &FieldRule, lint: &mut impl 
             check_field(&format!("{path}.{sub}"), m.get(sub.as_str()), sub_rule, lint);
         }
     }
+    if let (Value::Mapping(m), Some(value_rule)) = (v, &rule.values) {
+        for (k, item) in m {
+            check_field(&format!("{path}.{}", k.as_str().unwrap_or("?")), Some(item), value_rule, lint);
+        }
+    }
     if let (Value::Sequence(items), Some(item_rule)) = (v, &rule.items) {
         for (i, item) in items.iter().enumerate() {
             check_field(&format!("{path}.{i}"), Some(item), item_rule, lint);
@@ -191,6 +213,12 @@ fn check_rule(path: &str, rule: &FieldRule) -> Result<(), String> {
     }
     if !rule.fields.is_empty() && rule.ty != FieldType::Map {
         return Err(format!("{path}: `fields` needs `type: map`"));
+    }
+    if rule.values.is_some() && rule.ty != FieldType::Map {
+        return Err(format!("{path}: `values` needs `type: map`"));
+    }
+    if let Some(r) = &rule.values {
+        check_rule(&format!("{path}{{}}"), r)?;
     }
     for (sub, r) in &rule.fields {
         check_rule(&format!("{path}.{sub}"), r)?;
@@ -228,6 +256,7 @@ fn type_name(t: FieldType) -> &'static str {
         FieldType::StringList => "a list of strings",
         FieldType::List => "a list",
         FieldType::Map => "a map",
+        FieldType::Blob => "a blob name",
     }
 }
 
@@ -281,7 +310,6 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../gestalts/flashcard/v1.yml"),
     include_str!("../../../gestalts/appointment/v1.yml"),
     include_str!("../../../gestalts/link/v1.yml"),
-    include_str!("../../../gestalts/pronunciation-card/v1.yml"),
     include_str!("../../../gestalts/fsrs-state/v1.yml"),
     include_str!("../../../gestalts/recurring/v1.yml"),
     include_str!("../../../gestalts/daily/v1.yml"),
@@ -291,10 +319,8 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../gestalts/template/v1.yml"),
     include_str!("../../../gestalts/source/v1.yml"),
     include_str!("../../../gestalts/canvas/v1.yml"),
-    include_str!("../../../gestalts/typst-document/v1.yml"),
     include_str!("../../../gestalts/term/v1.yml"),
     include_str!("../../../gestalts/sentence/v1.yml"),
-    include_str!("../../../gestalts/quote/v1.yml"),
     include_str!("../../../gestalts/country/v1.yml"),
     include_str!("../../../gestalts/scene-object/v1.yml"),
     include_str!("../../../gestalts/interaction/v1.yml"),
@@ -304,6 +330,9 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../gestalts/canvas/v2.yml"),
     include_str!("../../../gestalts/template/v2.yml"),
     include_str!("../../../gestalts/cards/v1.yml"),
+    include_str!("../../../gestalts/conflict/v1.yml"),
+    include_str!("../../../gestalts/pane/v1.yml"),
+    include_str!("../../../gestalts/plugin-install/v1.yml"),
 ];
 
 /// What identifies a card within its note, as dsl computes it: sha1 of the front with trailing whitespace on each
@@ -319,6 +348,21 @@ impl Gestalts {
         Self::from_yaml(BUILTIN).expect("builtin gestalts are valid")
     }
 
+    /// The core's gestalts plus `extra` (a plugin's, loaded at runtime). Fails on a broken definition, or one that
+    /// redefines a gestalt.
+    pub fn builtin_with(extra: &[&str]) -> Result<Self, String> {
+        let mut all: Vec<&str> = BUILTIN.to_vec();
+        all.extend_from_slice(extra);
+        let g = Self::from_yaml(&all)?;
+        let mut seen = std::collections::BTreeSet::new();
+        for d in g.defs() {
+            if !seen.insert(d.id()) {
+                return Err(format!("{} is defined twice", d.id()));
+            }
+        }
+        Ok(g)
+    }
+
     pub fn from_yaml(sources: &[&str]) -> Result<Self, String> {
         let defs = sources
             .iter()
@@ -327,6 +371,9 @@ impl Gestalts {
         for d in &defs {
             for (field, rule) in &d.fields {
                 check_rule(field, rule).map_err(|e| format!("{}: {e}", d.id()))?;
+            }
+            if let Some(m) = &d.merge {
+                gestalts_merge::Policy::parse(m).map_err(|e| format!("{}: merge: {e}", d.id()))?;
             }
         }
         Ok(Gestalts { defs })
@@ -353,11 +400,21 @@ impl Gestalts {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn note(raw: &str) -> Note {
         Note::parse("k", raw)
+    }
+
+    /// The core's gestalts and those of the plugins these tests read about.
+    pub(crate) fn with_plugins() -> Gestalts {
+        Gestalts::builtin_with(&[
+            include_str!("../../../plugins/greek-alphabet/gestalts/pronunciation-card/v1.yml"),
+            include_str!("../../../plugins/typst/gestalts/typst-document/v1.yml"),
+            include_str!("../../../plugins/quotes/gestalts/quote/v1.yml"),
+        ])
+        .unwrap()
     }
 
     #[test]
@@ -392,7 +449,7 @@ mod tests {
 
     #[test]
     fn pronunciation_card_and_fsrs_state() {
-        let g = Gestalts::builtin();
+        let g = with_plugins();
         let card = note("title: δελφίς\nlang: grc\ntags: [pronunciation-card]\nblobs:\n  - {label: image, file: a.webp}\n  - {label: audio, file: a.mp3}\n");
         assert_eq!(g.of(&card), vec!["pronunciation-card@1"]);
         let no_audio = note("title: x\ntags: [pronunciation-card]\n");
@@ -435,11 +492,12 @@ mod tests {
     fn misplaced_items_or_fields_are_rejected() {
         assert!(Gestalts::from_yaml(&["name: x\nversion: 1\nfields:\n  a: { type: map, items: { type: string } }\n"]).is_err());
         assert!(Gestalts::from_yaml(&["name: x\nversion: 1\nfields:\n  a: { type: list, fields: { b: { type: string } } }\n"]).is_err());
+        assert!(Gestalts::builtin_with(&["name: flashcard\nversion: 1\n"]).is_err(), "redefined");
     }
 
     #[test]
     fn source_and_typst_document() {
-        let g = Gestalts::builtin();
+        let g = with_plugins();
         let s = note("tags: [source]\ntitle: Attention Is All You Need\ncitekey: vaswani2017\nentrytype: inproceedings\nauthor: [\"Vaswani, Ashish\", World Health Organization]\ndate: 2017-06\nvolume: \"30\"\nurl: https://arxiv.org/abs/1706.03762\nbib_extra: {keywords: transformers}\n");
         assert_eq!(g.of(&s), vec!["link@1", "source@1"], "{:?}", g.lint(&s));
         let t = note("tags: [typst]\nsource: \"= Hi\"\nassets: {/images/a.webp: 0123456789abcdef.webp}\nrelationships: [{to: h, label: document-of}]\n");
@@ -495,7 +553,7 @@ mod tests {
 
     #[test]
     fn integration_gestalts() {
-        let g = Gestalts::builtin();
+        let g = with_plugins();
         has(&g, "tags: [term]\ntitle: كتاب\nlang: ar\ntranslations: [book]\ntransliteration: kitāb\nexamples:\n  - {text: هذا كتاب, translation: this is a book}\naliases: [كتب]\nblobs: [{label: audio, file: a.mp3}]\n", "term@1");
         has(&g, "tags: [term]\ntitle: ٣\nvalue: 3\n", "term@1");
         assert_eq!(lint_paths(&g, "tags: [term]\ntitle: x\nexamples: [{translation: y}]\nblobs: [{label: image, file: a}, {label: image, file: b}]\n"), vec!["examples.0.text", "blobs.image"]);

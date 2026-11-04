@@ -26,4 +26,7 @@ fields:
       scheduledDays: { type: number }
       learningStep: { type: integer, min: 0 }
 relationships:
-  reviews: { min: 1, max: 1 }
+  reviews: { min: 1, max: 1, dies_with_target: true }
+# two devices rating the same card: the later review wins as a whole, then the one with more reps
+merge:
+  whole: { newest_by: [card.lastReviewAt, card.reps] }

@@ -12,7 +12,8 @@ pinned in `mise.toml`; rustup picks up the Rust version from `rust-toolchain.tom
 mise install          # once after cloning, and when mise.toml changes
 mise run dev          # connector (dev profile, repo plugins) + Gestalter :5173 + Demo :5174, hot reload
 mise run check        # tests, lints, typechecks
-mise run publish-data apps/demo/public/gestalt-data   # after editing the shipped deck
+mise run check-plugin-standalone quotes   # build a plugin outside the workspace, as in its own repo
+mise run publish-data plugins/greek-alphabet/deck     # after editing a plugin's deck
 mise tasks            # everything else
 ```
 

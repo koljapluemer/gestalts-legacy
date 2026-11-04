@@ -127,6 +127,10 @@ impl Storage for Opfs {
         check_key(name)?;
         write(&self.blobs, name, bytes).await
     }
+    async fn delete_blob(&self, name: &str) -> Result<()> {
+        check_key(name)?;
+        remove(&self.blobs, name).await
+    }
     async fn read_all_notes(&self) -> Result<Vec<(String, String)>> {
         let keys = self.list_notes().await?;
         let texts = futures::future::try_join_all(keys.iter().map(|k| self.read_note(k))).await?;

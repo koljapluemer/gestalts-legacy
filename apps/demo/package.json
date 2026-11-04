@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@gestalts/client": "workspace:*",
+    "@gestalts/sdk": "workspace:*",
     "@gestalts/ui": "workspace:*",
     "lucide-react": "1.66.0",
     "react": "19.3.1",

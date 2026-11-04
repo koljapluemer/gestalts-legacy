@@ -37,6 +37,7 @@ class ConnectorClient:
         self._request("PUT", "/notes/" + urllib.parse.quote(key, safe=""), yaml.encode(), "application/yaml")
 
     def delete_note(self, key: str) -> None:
+        """Deletes the note: the connector writes its tombstone, so the delete syncs."""
         self._request("DELETE", "/notes/" + urllib.parse.quote(key, safe=""))
 
     def read_blob(self, name: str) -> bytes | None:

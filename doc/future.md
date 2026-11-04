@@ -21,7 +21,7 @@ and `relationships`, `blobs` and `tags` merge as sets ([connector.md](connector.
 2. **Migrate in place, lazily.** The dsl migration has run, and its `canvas@1`, `template@1` and `card-of`
    `flashcard@1` notes are in use and syncing between devices. There's no bulk rewrite. Perspectives read both forms,
    the host's key first. The first write through the new form folds the attached note into the host and tags the
-   old note `retired`. It isn't deleted, since sync lets an edit beat a delete. If another device edits the old note
+   old note `retired`. It isn't deleted: a fold that lost to a concurrent edit should be offered back, not hidden. If another device edits the old note
    after that, it's newer than the fold: offer it as a conflict on the host, as the canvas's reload does today.
    New notes are written in the new form only.
 
@@ -36,20 +36,22 @@ Separate notes stay where they have their own writer or identity:
 One plan session each, in this order. Each ends with a visual check in the app and `doc/` updated.
 
 Before the split into repos ([foundations.md](foundations.md)):
-- [ ] `crates/merge`: symmetric, rule-based 3-way merge of YAML values (`diffy` for text, property-tested laws);
+- [x] `crates/merge`: symmetric, rule-based 3-way merge of YAML values (`diffy` for text, property-tested laws);
   `merge:` in gestalts; policies for `fsrs-state`, `cards`, `canvas`, `practice-session`, `settings`
-- [ ] Structured conflicts: `conflict@1` notes, a generic resolver, deterministic resolving by perspectives
-- [ ] Tombstones: delete wins over a concurrent edit (the edit kept as a conflict), `Layered` whiteouts,
+- [x] Structured conflicts: `conflict@1` notes, a generic resolver, deterministic resolving by perspectives
+- [x] Tombstones: delete wins over a concurrent edit (the edit kept as a conflict), `Layered` whiteouts,
   `dies_with_target`
-- [ ] Blob collection: sync copies only referenced blobs, per-storage collection after sync, `delete_blob`, lint that
+- [x] Blob collection: sync copies only referenced blobs, per-storage collection after sync, `delete_blob`, lint that
   every reference is in `blobs`
-- [ ] `plugin-install@1` and `pane@1` notes; the Gestalter's tabs from pane notes, seeded from the distribution
-- [ ] `@gestalts/sdk` (scoped port, host capabilities) and `@gestalts/kit`; lint that plugins import only those
-- [ ] Plugin manifest v2, runtime gestalts, `Layered` with N decks (source aliases), distributions, install UI for
+- [x] `plugin-install@1` and `pane@1` notes; the Gestalter's tabs from pane notes, seeded from the distribution
+- [x] `@gestalts/sdk` (scoped port, host capabilities) and `@gestalts/kit`; lint that plugins import only those
+- [x] Plugin manifest v2, runtime gestalts, `Layered` with N decks (source aliases), distributions, install UI for
   built-in plugins
-- [ ] `plugins/greek-alphabet` (with the Demo's deck); the Demo as a distribution
-- [ ] `plugins/learn` and `@gestalts/learning`
-- [ ] `plugins/quotes`, the first sam-learns port, built against the public packages only, ready for its own repo
+- [x] `@gestalts/learning`; `plugins/greek-alphabet` (with the Demo's deck, aliased `demo`); the Demo as a distribution
+- [x] `plugins/learn`
+- [x] The other first-party panes as built-in plugins: explorer, canvas, sources, typst (with Canvas2Typ through a
+  `note-view` slot)
+- [x] `plugins/quotes`, the first sam-learns port, built against the public packages only, ready for its own repo
 
 Done:
 - [x] Set merge for `relationships`, `blobs`, `tags` in `merge3`
@@ -59,7 +61,8 @@ Done:
 - [x] Note parity with dsl: rendered `main`/`extra` with `[[links]]`, embeds, math and cards; backlinks widget;
   media attach and camera; `[[` completion
 
-After that, each as a plugin in `plugins/<id>/`.
+Next, the split itself: `plugins/quotes` into a repo of its own, depending on released `@gestalts/sdk`, `kit` and
+`learning` (see [Later](#later)). After that, each as a plugin in `plugins/<id>/` or a repo of its own.
 
 dsl:
 - [x] Learn
@@ -74,6 +77,7 @@ dsl:
 - [ ] Semantic search (Ollama embeddings), continuous `.bib` export
 
 sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate the actual per-user learning data, not needed); quotes is above):
+- [x] quotes (the first, above)
 - [ ] learn-flags, world-map
 - [ ] top-vocab, dont-translate
 - [ ] 20-words
@@ -96,6 +100,9 @@ sam-learns (each: catalog → deck, its Dexie tables → notes (do not migrate t
 - Modification times in the `Storage` port, which the search would need for a "recent" list.
 - Authentication for the connector (a token per app).
 - Continuous `.bib` export to a path on disk, from the connector (the Sources pane downloads one).
+- Canvas2Typ shows the canvas through a slot, which takes only the note: add notes to it from the Canvas pane. A
+  slot with an "add" input would bring that back.
+- Changing installs takes a reload (decks mount when the repo opens).
 - Undo for more than the last canvas removal; text ↔ note conversions are not undoable yet.
 - Learner activity and time statistics. `practice-session@1` notes record trials and active time now, but no page shows them yet (sam-learns' own statistics weren't migrated).
 - Decks, beyond copy-on-write ([architecture.md](architecture.md#copy-on-write-from-a-deck)):

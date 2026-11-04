@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 
 use crate::gestalt::{Gestalts, Lint};
+use crate::merge::{is_tombstone, tombstone};
 use crate::note::{Note, to_yaml};
 use crate::storage::{Result, Storage, check_key};
 
@@ -46,11 +47,26 @@ pub struct IndexedNote {
     pub id: String,
     pub gestalts: Vec<String>,
     pub lints: Vec<Lint>,
+    /// a tombstone ([`crate::merge::is_tombstone`])
+    #[serde(skip)]
+    pub deleted: bool,
+    /// the targets this note dies with (`dies_with_target` relationships)
+    #[serde(skip)]
+    pub dies_with: Vec<String>,
 }
 
 impl IndexedNote {
-    fn new(note: Note, gestalts: &Gestalts) -> Self {
-        IndexedNote { id: note.id().to_owned(), gestalts: gestalts.of(&note), lints: gestalts.lint(&note), note }
+    pub fn new(note: Note, gestalts: &Gestalts) -> Self {
+        let deleted = note.value.as_ref().is_some_and(is_tombstone);
+        let mut dies_with = Vec::new();
+        for d in gestalts.defs().iter().filter(|d| d.is_candidate(&note)) {
+            for (label, _) in d.relationships.iter().filter(|(_, c)| c.dies_with_target) {
+                dies_with.extend(note.relationships().into_iter().filter(|r| r.label.as_deref() == Some(label.as_str())).map(|r| r.target));
+            }
+        }
+        let mut lints = gestalts.lint(&note);
+        lints.extend(crate::blobs::unlisted_blobs(&note, gestalts));
+        IndexedNote { id: note.id().to_owned(), gestalts: gestalts.of(&note), lints, deleted, dies_with, note }
     }
 }
 
@@ -101,26 +117,46 @@ impl<S: Storage> Repo<S> {
         Ok(())
     }
 
+    /// Every indexed note's `(key, raw text)`, tombstones included.
+    pub fn texts(&self) -> Vec<(String, String)> {
+        self.index.borrow().values().map(|n| (n.note.key.clone(), n.note.raw.clone())).collect()
+    }
+
+    /// The note, unless it's deleted: a tombstone, or a note that died with its target.
     pub fn get(&self, key: &str) -> Option<IndexedNote> {
-        self.index.borrow().get(key).cloned()
+        let index = self.index.borrow();
+        let n = index.get(key)?;
+        (!self.is_dead(&index, n)).then(|| n.clone())
+    }
+
+    /// Whether `key` is a tombstone (so writing it brings the note back).
+    pub fn is_deleted(&self, key: &str) -> bool {
+        self.index.borrow().get(key).is_some_and(|n| n.deleted)
     }
 
     /// The key of the note whose `id` (or key) is `id`.
     pub fn key_of(&self, id: &str) -> Option<String> {
         let index = self.index.borrow();
-        if index.contains_key(id) {
+        if index.get(id).is_some_and(|n| !n.deleted) {
             return Some(id.to_owned());
         }
-        index.values().find(|n| n.id == id).map(|n| n.note.key.clone())
+        index.values().find(|n| n.id == id && !n.deleted).map(|n| n.note.key.clone())
     }
 
+    /// Matching notes, without deleted ones.
     pub fn query(&self, q: &Query) -> Vec<IndexedNote> {
-        self.index
-            .borrow()
+        let index = self.index.borrow();
+        let tombstoned = tombstoned_ids(&index);
+        index
             .values()
+            .filter(|n| !n.deleted && !n.dies_with.iter().any(|t| tombstoned.contains(t.as_str())))
             .filter(|n| q.matches(&n.note, &n.gestalts))
             .cloned()
             .collect()
+    }
+
+    fn is_dead(&self, index: &BTreeMap<String, IndexedNote>, n: &IndexedNote) -> bool {
+        n.deleted || (!n.dies_with.is_empty() && n.dies_with.iter().any(|t| tombstoned_ids(index).contains(t.as_str())))
     }
 
     /// Writes raw text as-is (it may even be invalid YAML).
@@ -153,11 +189,26 @@ impl<S: Storage> Repo<S> {
         self.put_raw(&key, &to_yaml(&value)).await
     }
 
-    pub async fn delete(&self, key: &str) -> Result<()> {
-        self.storage.delete_note(key).await?;
-        self.index.borrow_mut().remove(key);
-        Ok(())
+    /// Deletes a note by writing its tombstone, dated `now` (an ISO datetime), and the tombstones of the notes that
+    /// die with it. Returns every key it deleted.
+    pub async fn delete(&self, key: &str, now: &str) -> Result<Vec<String>> {
+        let Some(n) = self.index.borrow().get(key).cloned() else { return Ok(vec![]) };
+        if n.deleted {
+            return Ok(vec![]);
+        }
+        let mut deleted = vec![key.to_owned()];
+        let dependents: Vec<IndexedNote> = self.index.borrow().values().filter(|d| !d.deleted && d.dies_with.contains(&n.id)).cloned().collect();
+        self.put_raw(key, &tombstone(&n.id, now)).await?;
+        for d in dependents {
+            self.put_raw(&d.note.key, &tombstone(&d.id, now)).await?;
+            deleted.push(d.note.key);
+        }
+        Ok(deleted)
     }
+}
+
+fn tombstoned_ids(index: &BTreeMap<String, IndexedNote>) -> std::collections::HashSet<&str> {
+    index.values().filter(|n| n.deleted).map(|n| n.id.as_str()).collect()
 }
 
 /// A fresh random uuid, for frontends that name new notes themselves.
@@ -208,8 +259,10 @@ mod tests {
             assert_eq!(n.id, n.note.key);
             assert!(n.note.raw.starts_with("id: "));
             assert_eq!(repo.key_of(&n.id), Some(n.note.key.clone()));
-            repo.delete(&n.note.key).await.unwrap();
+            repo.delete(&n.note.key, "2026-11-04T10:00:00Z").await.unwrap();
             assert!(repo.get(&n.note.key).is_none());
+            assert!(repo.is_deleted(&n.note.key));
+            assert!(repo.storage().read_note(&n.note.key).await.unwrap().unwrap().contains("deleted:"));
         });
     }
 
@@ -232,6 +285,25 @@ mod tests {
             assert!(repo.get("b").is_none());
             assert!(repo.get("c").is_some());
             assert!(repo.get("d").is_none(), "not asked for");
+        });
+    }
+
+    #[test]
+    fn learner_state_dies_with_its_card() {
+        pollster::block_on(async {
+            let repo = Repo::new(Memory::default(), Gestalts::builtin());
+            repo.put_raw("card", "id: card\ntags: [flashcard]\nfront: x\nback: y\n").await.unwrap();
+            repo.put_raw("state", "tags: [fsrs-state]\nrelationships: [{to: card, label: reviews}]\n").await.unwrap();
+            repo.put_raw("other", "tags: [fsrs-state]\nrelationships: [{to: elsewhere, label: reviews}]\n").await.unwrap();
+            let deleted = repo.delete("card", "2026-11-04T10:00:00Z").await.unwrap();
+            assert_eq!(deleted, vec!["card", "state"]);
+            assert_eq!(repo.query(&Query::default()).len(), 1);
+            // a state written elsewhere while the card was being deleted: hidden as well
+            repo.put_raw("late", "tags: [fsrs-state]\nrelationships: [{to: card, label: reviews}]\n").await.unwrap();
+            assert!(repo.get("late").is_none());
+            // writing over the tombstone brings the card back
+            repo.put_raw("card", "id: card\ntags: [flashcard]\nfront: x\nback: y\n").await.unwrap();
+            assert!(repo.get("late").is_some());
         });
     }
 

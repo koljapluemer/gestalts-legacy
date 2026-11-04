@@ -66,9 +66,15 @@ run = "bash scripts/install-package.sh target/packages"
 [tasks.lint-data]
 description = "Print each note's gestalts and lints for a data folder"
 usage = 'arg "<dir>" help="the data folder (notes/ + blobs/)"'
-run = "cargo run -q --release -p gestalts-connector --no-default-features -- lint {{usage.dir}}"
+run = "cargo run -q --release -p gestalts-connector --no-default-features -- --plugins-dir plugins lint {{usage.dir}}"
 
 [tasks.publish-data]
 description = "Prepare a data folder for publishing as a read-only deck: content-addressed blobs, index.json, lints"
 usage = 'arg "<dir>" help="the data folder (notes/ + blobs/)"'
-run = "cargo run -q --release -p gestalts-connector --no-default-features -- publish {{usage.dir}}"
+run = "cargo run -q --release -p gestalts-connector --no-default-features -- --plugins-dir plugins publish {{usage.dir}}"
+
+[tasks.check-plugin-standalone]
+description = "Build a plugin outside the workspace, against the packed public packages only (as in a repo of its own)"
+usage = 'arg "<id>" help="the plugin, e.g. quotes"'
+depends = ["setup"]
+run = "bash scripts/check-plugin-standalone.sh {{usage.id}}"

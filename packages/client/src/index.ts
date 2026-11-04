@@ -1,13 +1,7 @@
-export { Repo, ServiceClient, cardId, contentHash, hashing, merge3, newId, stableId, stateKey, type RepoSource, type ConnectorStatus } from './repo';
-export { bib, type Source, type FieldKind, type SourceMatch, type SourceMerge } from './bib';
-export { RepoProvider, useRepo, useRepoVersion, useQuery, useData, useNote, useBlobUrl, useConnector, useOpenRepo } from './react';
-export * from './fields';
-export * as fold from './fold';
-export { INLINE, inlineOutOfSync, inlineRefs, inlineTexts, syncInline, type RefsOf } from './inline';
-export type { Card, Template, Part, Hashing, FoldWrites } from './fold';
-export { MODEL as FSRS_MODEL, Rating, fsrsStates, fsrsStateValue, getScheduler, isAhead, review, stateFromNote, withLocal, type Facet, type LocalReview, type FsrsStates, type Grade, type ReviewState, type Scheduler } from './learning';
-export { learnableCards, pickNext, slotOf, until, type LearnCard, type Pick as LearnPick } from './learn';
-export { IDLE_MS, SESSION_GAP_MS, PracticeSession, type SessionEvent } from './session';
-export { usePracticeSession, useLocalReviews, saveReview, type PracticeLog } from './practice';
-export type * from './types';
-export { CAPACITY as LOG_CAPACITY, debugLog, installGlobalCapture, logger, onDebugLog, type DebugSnapshot, type Level as LogLevel, type LogEvent, type Logger, type Span } from './log';
+/**
+ * The host's side of the core (`@gestalts/client`): the wasm-backed `Repo`, opening and syncing it. Everything a
+ * perspective uses comes from `@gestalts/sdk`, re-exported here for the host's own code.
+ */
+export * from '@gestalts/sdk';
+export { Repo, type DeckSource, type RepoSource, type ConnectorStatus } from './repo';
+export { useConnector, useHostRepo, useOpenRepo } from './react';

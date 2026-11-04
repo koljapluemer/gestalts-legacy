@@ -107,6 +107,9 @@ impl Storage for Static {
     async fn write_blob(&self, _: &str, _: &[u8]) -> Result<()> {
         Err(StorageError::ReadOnly)
     }
+    async fn delete_blob(&self, _: &str) -> Result<()> {
+        Err(StorageError::ReadOnly)
+    }
     async fn read_all_notes(&self) -> Result<Vec<(String, String)>> {
         let texts = futures::future::try_join_all(self.index.notes.iter().map(|k| self.read_note(k))).await?;
         Ok(self.index.notes.iter().cloned().zip(texts).filter_map(|(k, t)| Some((k, t?))).collect())
@@ -127,6 +130,19 @@ struct NoteEntry {
 impl Connector {
     pub fn new(base: &str) -> Self {
         Connector { base: base.trim_end_matches('/').to_owned() }
+    }
+
+    /// Asks the connector to collect the folder's unreferenced blobs; the names it deleted. An older connector
+    /// without the endpoint collects nothing.
+    pub async fn collect_blobs(&self) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Collected {
+            deleted: Vec<String>,
+        }
+        match fetch(&format!("{}/blobs/collect", self.base), "POST", Some(&[])).await {
+            Ok(Some(r)) => Ok(json::<Collected>(r).await.map(|c| c.deleted).unwrap_or_default()),
+            _ => Ok(vec![]),
+        }
     }
 
     /// Fails unless a connector answers at the URL.
@@ -167,6 +183,9 @@ impl Storage for Connector {
     }
     async fn write_blob(&self, name: &str, data: &[u8]) -> Result<()> {
         fetch(&format!("{}/blobs/{}", self.base, enc(name)), "PUT", Some(data)).await.map(drop)
+    }
+    async fn delete_blob(&self, name: &str) -> Result<()> {
+        fetch(&format!("{}/blobs/{}", self.base, enc(name)), "DELETE", None).await.map(drop)
     }
     async fn read_all_notes(&self) -> Result<Vec<(String, String)>> {
         let r = fetch(&format!("{}/notes", self.base), "GET", None).await?.ok_or_else(|| StorageError::Io("no /notes".into()))?;

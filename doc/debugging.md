@@ -41,7 +41,7 @@ then reload. `delete localStorage['gestalts:debug']` turns it off.
 ## Adding logs
 
 ```ts
-import { logger } from '@gestalts/client';
+import { logger } from '@gestalts/sdk'; // the host's code may also use @gestalts/client
 const log = logger('my-scope');
 log.info('did a thing', { key });
 const span = log.span('slow thing', { key });

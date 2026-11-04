@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { useConnector } from '@gestalts/client';
-import { definePerspective } from '../define/definePerspective';
+import { useConnector, useHostRepo } from '@gestalts/client';
+import { definePerspective } from '@gestalts/sdk';
+import { Conflicts } from '@gestalts/kit';
 
 const DEFAULT_URL = 'http://127.0.0.1:7717';
 
 /** Connect to a running gestalts-connector, which makes a folder on disk the source of truth. */
-export const ConnectorSettings = definePerspective<Record<string, never>>({
+export const ConnectorSettings = definePerspective<Record<string, never>, { onOpen?: (key: string) => void }>({
   id: 'connector-settings',
   title: 'Connector',
   data: {},
-  Component: ({ repo }) => {
+  Component: ({ onOpen }) => {
+    const repo = useHostRepo();
     const status = useConnector();
     const [url, setUrl] = useState(status.url ?? DEFAULT_URL);
     return (
@@ -33,13 +35,7 @@ export const ConnectorSettings = definePerspective<Record<string, never>>({
           {status.folder && status.state !== 'error' && <code className="block truncate" title={status.folder}>{status.folder}</code>}
           {status.state === 'error' && <span className="text-error">{status.error}</span>}
         </p>
-        {status.conflicts.length > 0 && (
-          <div role="alert" className="alert alert-warning alert-soft text-xs">
-            <span>
-              Conflicting edits; the other side's version was kept as: {status.conflicts.map((c) => <code key={c} className="block">{c}</code>)}
-            </span>
-          </div>
-        )}
+        <Conflicts onOpen={onOpen} />
       </div>
     );
   },

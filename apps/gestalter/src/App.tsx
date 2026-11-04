@@ -1,38 +1,35 @@
-import { useSyncExternalStore } from 'react';
-import { Cable } from 'lucide-react';
-import { RepoProvider, useOpenRepo } from '@gestalts/client';
-import { DebugLogButton, ErrorBoundary } from '@gestalts/ui/debug';
-import { panes } from '@gestalts/ui/panes';
+import { Blocks, Cable } from 'lucide-react';
+import { distribution, plugins } from 'virtual:gestalts-plugins';
+import { RepoProvider } from '@gestalts/client';
+import { DebugLogButton } from '@gestalts/ui/debug';
+import { PaneTabs, PluginSettings, usePluginRepo, type PluginEntry } from '@gestalts/ui/host';
 import { ConnectorSettings, useConnectorState } from '@gestalts/ui/perspectives';
 
-const SOURCE = { kind: 'opfs', dir: 'gestalter' } as const;
+const REGISTRY = { distribution, plugins };
 
 export function App() {
-  const { repo, error } = useOpenRepo(SOURCE);
+  const { repo, installed, error } = usePluginRepo('gestalter', REGISTRY);
   if (error) return <Failure message={error} />;
   if (!repo) return <div className="flex h-dvh items-center justify-center"><span className="loading loading-spinner" /></div>;
-  return <RepoProvider repo={repo}><Shell /></RepoProvider>;
+  return (
+    <RepoProvider repo={repo}>
+      <PaneTabs registry={REGISTRY} title="Gestalter" end={<>
+        <DebugLogButton />
+        {distribution.install_ui && <PluginsMenu mounted={installed} />}
+        <ConnectorMenu />
+      </>} />
+    </RepoProvider>
+  );
 }
 
-function Shell() {
-  const current = usePaneId();
-  const entry = panes.find((p) => p.id === current) ?? panes[0];
+function PluginsMenu({ mounted }: { mounted: PluginEntry[] }) {
   return (
-    <div className="flex h-dvh flex-col bg-base-200">
-      <nav className="navbar min-h-0 gap-2 border-b border-base-300 bg-base-100 px-3 py-1">
-        <span className="font-semibold">Gestalter</span>
-        <div className="join flex-1 overflow-x-auto">
-          {panes.map((p) => (
-            <button key={p.id} type="button" className={`btn btn-sm join-item ${p.id === entry.id ? 'btn-active' : ''}`} onClick={() => setPaneId(p.id)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <DebugLogButton />
-        <ConnectorMenu />
-      </nav>
-      <main className="min-h-0 flex-1"><ErrorBoundary key={entry.id} name={entry.label}><entry.Pane /></ErrorBoundary></main>
-    </div>
+    <details className="dropdown dropdown-end">
+      <summary className="btn btn-sm btn-ghost btn-square" title="Plugins"><Blocks className="size-4" /></summary>
+      <div className="dropdown-content z-50 mt-2 rounded-box border border-base-300 bg-base-100 p-3 shadow">
+        <PluginSettings registry={REGISTRY} mounted={mounted} />
+      </div>
+    </details>
   );
 }
 
@@ -57,18 +54,4 @@ function Failure({ message }: { message: string }) {
       <div role="alert" className="alert alert-error max-w-lg">Could not open local storage: {message}</div>
     </div>
   );
-}
-
-// the selected pane lives in the URL (?pane=), so reloads and links keep it
-const paneListeners = new Set<() => void>();
-function usePaneId(): string | null {
-  return useSyncExternalStore(
-    (l) => { paneListeners.add(l); window.addEventListener('popstate', l); return () => { paneListeners.delete(l); window.removeEventListener('popstate', l); }; },
-    () => new URLSearchParams(location.search).get('pane'),
-  );
-}
-function setPaneId(id: string) {
-  // a fresh query string: other params belong to the previous pane
-  history.pushState(null, '', `${location.pathname}?pane=${encodeURIComponent(id)}`);
-  paneListeners.forEach((l) => l());
 }

@@ -1,99 +1,223 @@
 //! Three-way merge of one note, and syncing two storages against a base snapshot.
 //!
-//! Rules, kept simple on purpose:
-//! - one side changed (vs. the base): take it
-//! - both changed, both YAML maps: merge per top-level key; a key both sides changed differently
-//!   is a conflict, resolved local-first
-//! - except `relationships`, `blobs` and `tags`, merged as sets: an item either side added is kept, an item either side
-//!   removed is dropped, local order first, then remote additions. Items are compared whole, so a label changed
-//!   differently on both sides leaves both items.
-//! - both changed otherwise (unparseable, not maps, created on both sides without a base): local wins
-//! - a delete on one side and an edit on the other: the edit wins
+//! A note merges by its policy: the default (`tags`, `relationships` and `blobs` as sets; `main`, `extra` and
+//! `tasks` as text; everything else per key) with the `merge:` rules of every gestalt the note is a candidate for on
+//! any of the three sides laid over it ([`note_policy`]). The engine is `gestalts-merge`, which is symmetric: nothing
+//! depends on which side is local.
 //!
-//! On a conflict the remote text is kept as a separate note `<key>.conflict-<tag>`.
+//! Before the engine:
+//! - one side changed (vs. the base): take it, deletes included
+//! - a side missing while the base has the note was deleted by hand: it counts as a tombstone
+//! - a tombstone against an edit: the tombstone wins, and the edit is kept as a conflict, to restore it from
+//! - two tombstones: the later one
+//! - unparseable or not a map: the whole text is a conflict
+//!
+//! Every conflict no rule settles becomes a `conflict@1` note ([`conflict_note`]) on all three sides.
 
 use std::collections::{BTreeSet, HashMap};
 
+use gestalts_merge::{Conflict, Policy, Segment, canonical};
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 
-use crate::note::{parse_yaml, to_yaml};
+use crate::gestalt::Gestalts;
+use crate::note::{Note, parse_yaml, to_yaml};
+use crate::repo::stable_id;
 use crate::storage::{Result, Storage};
+use crate::upstream::content_hash;
 
+/// The outcome of merging one note.
 #[derive(Debug, PartialEq)]
-pub struct Merged {
-    /// `None`: the note is deleted
+pub struct NoteMerge {
+    /// `None`: the note is absent (it was on neither side)
     pub text: Option<String>,
-    /// the remote text, when part of it lost a conflict
-    pub conflict: Option<String>,
+    pub conflicts: Vec<Conflict>,
+    /// the conflicts are over the whole text (unparseable, not a map), values being raw text
+    pub raw: bool,
 }
 
-pub fn merge3(base: Option<&str>, local: Option<&str>, remote: Option<&str>) -> Merged {
-    let take = |t: Option<&str>| Merged { text: t.map(str::to_owned), conflict: None };
-    if local == remote || remote == base {
+/// `{id, deleted}`: a note deleted at `deleted`. Kept forever, so a delete syncs like any other change.
+pub fn is_tombstone(value: &Value) -> bool {
+    value.as_mapping().is_some_and(|m| m.contains_key("deleted") && m.keys().all(|k| matches!(k.as_str(), Some("id" | "deleted"))))
+}
+
+pub fn is_tombstone_text(text: &str) -> bool {
+    parse_yaml(text).is_ok_and(|v| is_tombstone(&v))
+}
+
+/// The tombstone of the note `id`, deleted at `now` (an ISO datetime).
+pub fn tombstone(id: &str, now: &str) -> String {
+    let mut m = Mapping::new();
+    m.insert("id".into(), id.into());
+    m.insert("deleted".into(), now.into());
+    to_yaml(&Value::Mapping(m))
+}
+
+/// `unix_ms` as an ISO datetime in UTC (`2026-11-04T10:00:00.000Z`), for hosts that have a clock but no date library.
+pub fn iso_datetime(unix_ms: i64) -> String {
+    let (days, ms) = (unix_ms.div_euclid(86_400_000), unix_ms.rem_euclid(86_400_000));
+    // civil from days, after Howard Hinnant
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let (h, min, s, milli) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
+    format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}.{milli:03}Z")
+}
+
+/// The policy every note has.
+pub fn default_policy() -> Policy {
+    let mut keys = std::collections::BTreeMap::new();
+    for k in ["tags", "relationships", "blobs"] {
+        keys.insert(k.to_owned(), Policy::Set);
+    }
+    for k in ["main", "extra", "tasks"] {
+        keys.insert(k.to_owned(), Policy::Text);
+    }
+    Policy::Map(keys)
+}
+
+/// The default, with the policies of every gestalt any of `notes` is a candidate for laid over it. Gestalts that
+/// disagree on a value make it a conflict.
+pub fn note_policy(gestalts: &Gestalts, notes: &[&Note]) -> Policy {
+    let mut declared: Option<Policy> = None;
+    for d in gestalts.defs() {
+        let Some(p) = d.merge_policy() else { continue };
+        if notes.iter().any(|n| d.is_candidate(n)) {
+            declared = Some(match declared {
+                Some(q) => q.combine(&p),
+                None => p,
+            });
+        }
+    }
+    match declared {
+        Some(p) => default_policy().overlay(&p),
+        None => default_policy(),
+    }
+}
+
+/// Merges one note. `now` dates the tombstone of a note removed by hand.
+pub fn merge_note(key: &str, base: Option<&str>, local: Option<&str>, remote: Option<&str>, gestalts: &Gestalts, now: &str) -> NoteMerge {
+    let take = |t: Option<&str>| NoteMerge { text: t.map(str::to_owned), conflicts: vec![], raw: false };
+    // a note removed by hand is a delete: the base says it was there
+    let removed = base.map(|b| tombstone(Note::parse(key, b).id(), now));
+    let local = local.or(removed.as_deref());
+    let remote = remote.or(removed.as_deref());
+    if local == remote {
+        return take(local);
+    }
+    if remote == base {
         return take(local);
     }
     if local == base {
         return take(remote);
     }
-    // both changed
     let (Some(l), Some(r)) = (local, remote) else {
-        return take(local.or(remote)); // one deleted, the other edited
+        // without a base, a note on one side only
+        return take(local.or(remote));
     };
-    let maps = (base.map(parse_yaml), parse_yaml(l), parse_yaml(r));
-    let (Some(Ok(Value::Mapping(b))), Ok(Value::Mapping(lm)), Ok(Value::Mapping(rm))) = maps else {
-        return Merged { text: Some(l.to_owned()), conflict: Some(r.to_owned()) };
+    let (lv, rv) = (parse_yaml(l).ok(), parse_yaml(r).ok());
+    let bv = base.and_then(|b| parse_yaml(b).ok());
+    let (Some(lm), Some(rm)) = (lv.as_ref().filter(|v| v.is_mapping()), rv.as_ref().filter(|v| v.is_mapping())) else {
+        return raw_conflict(base, l, r);
     };
-    let (merged, conflicted) = merge_maps(&b, &lm, &rm);
-    if merged == lm {
-        // nothing came over from remote
-        return Merged { text: Some(l.to_owned()), conflict: conflicted.then(|| r.to_owned()) };
+    match (is_tombstone(lm), is_tombstone(rm)) {
+        (true, true) => {
+            let deleted = |v: &Value| v.get("deleted").map(canonical).unwrap_or_default();
+            let later = match deleted(lm).cmp(&deleted(rm)) {
+                std::cmp::Ordering::Equal => l.max(r),
+                std::cmp::Ordering::Greater => l,
+                std::cmp::Ordering::Less => r,
+            };
+            return take(Some(later));
+        }
+        (true, false) | (false, true) => {
+            let (tomb, edit_v) = if is_tombstone(lm) { (l, rm) } else { (r, lm) };
+            let conflict = Conflict { path: vec![], base: bv.clone(), kept: Some(parse_yaml(tomb).unwrap_or(Value::Null)), lost: Some(edit_v.clone()) };
+            return NoteMerge { text: Some(tomb.to_owned()), conflicts: vec![conflict], raw: false };
+        }
+        (false, false) => {}
     }
-    Merged { text: Some(to_yaml(&Value::Mapping(merged))), conflict: conflicted.then(|| r.to_owned()) }
+    let notes: Vec<Note> = [base, Some(l), Some(r)].into_iter().flatten().map(|t| Note::parse(key, t)).collect();
+    let policy = note_policy(gestalts, &notes.iter().collect::<Vec<_>>());
+    let out = gestalts_merge::merge(&policy, bv.as_ref().filter(|v| v.is_mapping()), Some(lm), Some(rm));
+    let text = match out.value {
+        None => None,
+        Some(v) if v == *lm && v == *rm => Some(l.max(r).to_owned()),
+        Some(v) if v == *lm => Some(l.to_owned()),
+        Some(v) if v == *rm => Some(r.to_owned()),
+        Some(v) => Some(to_yaml(&v)),
+    };
+    NoteMerge { text, conflicts: out.conflicts, raw: false }
 }
 
-fn merge_maps(base: &Mapping, local: &Mapping, remote: &Mapping) -> (Mapping, bool) {
-    let mut out = Mapping::new();
-    let mut conflicted = false;
-    let keys = local.keys().chain(remote.keys().filter(|k| !local.contains_key(*k)));
-    for k in keys.cloned().collect::<Vec<_>>() {
-        let (b, l, r) = (base.get(&k), local.get(&k), remote.get(&k));
-        let pick = if l == r || r == b {
-            l.cloned()
-        } else if l == b {
-            r.cloned()
-        } else if let Some(v) = k.as_str().filter(|k| SET_KEYS.contains(k)).and_then(|_| set_merge(b, l, r)) {
-            v
-        } else {
-            conflicted = true;
-            l.or(r).cloned()
-        };
-        if let Some(v) = pick {
-            out.insert(k, v);
-        }
-    }
-    (out, conflicted)
+/// Both texts changed and one doesn't parse as a map: keep the greater text, and record the other.
+fn raw_conflict(base: Option<&str>, l: &str, r: &str) -> NoteMerge {
+    let (kept, lost) = if l >= r { (l, r) } else { (r, l) };
+    let s = |t: &str| Value::String(t.to_owned());
+    let conflict = Conflict { path: vec![], base: base.map(s), kept: Some(s(kept)), lost: Some(s(lost)) };
+    NoteMerge { text: Some(kept.to_owned()), conflicts: vec![conflict], raw: true }
 }
 
-const SET_KEYS: [&str; 3] = ["relationships", "blobs", "tags"];
+/// The `conflict@1` note recording `c` in the note `key` (whose id is `note_id`): `(key, text)`. Its key depends on
+/// the note, the path and the values, so devices recording the same conflict write the same note, and a new conflict
+/// at the same path doesn't overwrite an unresolved older one.
+pub fn conflict_note(key: &str, note_id: &str, c: &Conflict, raw: bool, now: &str) -> (String, String) {
+    let path = Value::Sequence(c.path.iter().map(segment_value).collect());
+    let opt = |v: &Option<Value>| v.as_ref().map(canonical).unwrap_or_default();
+    let fingerprint = content_hash(format!("{}|{}|{}", opt(&c.base), opt(&c.kept), opt(&c.lost)).as_bytes());
+    let ck = stable_id("conflict", &format!("{key}#{}#{fingerprint}", canonical(&path)));
+    let mut m = Mapping::new();
+    m.insert("id".into(), ck.clone().into());
+    m.insert("title".into(), format!("Conflict in {key}{}", path_label(&c.path)).into());
+    m.insert("tags".into(), Value::Sequence(vec!["conflict".into()]));
+    let mut rel = Mapping::new();
+    rel.insert("to".into(), note_id.into());
+    rel.insert("label".into(), "conflict-of".into());
+    m.insert("relationships".into(), Value::Sequence(vec![Value::Mapping(rel)]));
+    m.insert("note".into(), key.into());
+    m.insert("path".into(), path);
+    if raw {
+        m.insert("raw".into(), true.into());
+    }
+    m.insert("recorded".into(), now.into());
+    for (k, v) in [("base", &c.base), ("kept", &c.kept), ("lost", &c.lost)] {
+        if let Some(v) = v {
+            m.insert(k.into(), v.clone());
+        }
+    }
+    (ck, to_yaml(&Value::Mapping(m)))
+}
 
-/// Merges three lists as sets. `None` when a side isn't a list; `Some(None)` drops the key.
-fn set_merge(base: Option<&Value>, local: Option<&Value>, remote: Option<&Value>) -> Option<Option<Value>> {
-    fn items(v: Option<&Value>) -> Option<&[Value]> {
-        match v {
-            None | Some(Value::Null) => Some(&[]),
-            Some(Value::Sequence(s)) => Some(s),
-            Some(_) => None,
+fn segment_value(s: &Segment) -> Value {
+    match s {
+        Segment::Key(k) => k.as_str().into(),
+        Segment::Item { by, id } => {
+            let mut m = Mapping::new();
+            m.insert("by".into(), by.as_str().into());
+            m.insert("id".into(), id.clone());
+            Value::Mapping(m)
         }
     }
-    let (b, l, r) = (items(base)?, items(local)?, items(remote)?);
-    let mut out: Vec<Value> = l.iter().filter(|i| !b.contains(i) || r.contains(i)).cloned().collect();
-    for i in r {
-        if !b.contains(i) && !out.contains(i) {
-            out.push(i.clone());
-        }
+}
+
+fn path_label(path: &[Segment]) -> String {
+    if path.is_empty() {
+        return String::new();
     }
-    Some((local.is_some() || !out.is_empty()).then_some(Value::Sequence(out)))
+    let parts: Vec<String> = path
+        .iter()
+        .map(|s| match s {
+            Segment::Key(k) => k.clone(),
+            Segment::Item { id, .. } => format!("[{}]", id.as_str().map_or_else(|| canonical(id), str::to_owned)),
+        })
+        .collect();
+    format!(": {}", parts.join("."))
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -102,7 +226,7 @@ pub struct SyncReport {
     pub pulled: Vec<String>,
     /// notes changed remotely because of local
     pub pushed: Vec<String>,
-    /// conflict notes created
+    /// `conflict@1` notes written
     pub conflicts: Vec<String>,
     pub blobs_pulled: Vec<String>,
     pub blobs_pushed: Vec<String>,
@@ -121,14 +245,13 @@ pub struct NoteCounts {
 pub const SYNC_STEPS: [&str; 5] = ["read_local", "read_remote", "read_base", "merge_notes", "blobs"];
 
 /// Syncs `local` and `remote` against `base`, the state both had after the last sync.
-/// Afterwards all three hold the same notes. Blobs are only ever added, never merged or deleted.
-/// `tag` names conflict notes and should be unique per sync, e.g. a timestamp.
-pub async fn sync(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage, tag: &str) -> Result<SyncReport> {
-    sync_with(local, remote, base, tag, &mut |_| {}).await
+/// Afterwards all three hold the same notes. `now` (an ISO datetime) dates tombstones and conflict records.
+pub async fn sync(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage, gestalts: &Gestalts, now: &str) -> Result<SyncReport> {
+    sync_with(local, remote, base, gestalts, now, &mut |_| {}).await
 }
 
 /// `sync`, calling `step` with each of `SYNC_STEPS` as it's done (to time them; the core has no clock).
-pub async fn sync_with(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage, tag: &str, step: &mut dyn FnMut(&str)) -> Result<SyncReport> {
+pub async fn sync_with(local: &dyn Storage, remote: &dyn Storage, base: &dyn Storage, gestalts: &Gestalts, now: &str, step: &mut dyn FnMut(&str)) -> Result<SyncReport> {
     let mut report = SyncReport::default();
     let all = |v: Vec<(String, String)>| v.into_iter().collect::<HashMap<_, _>>();
     let l = all(local.read_all_notes().await?);
@@ -140,40 +263,51 @@ pub async fn sync_with(local: &dyn Storage, remote: &dyn Storage, base: &dyn Sto
     report.notes = NoteCounts { local: l.len(), remote: r.len(), base: b.len() };
     // sorted, so the report lists keys in order
     let keys: BTreeSet<&str> = l.keys().chain(r.keys()).chain(b.keys()).map(String::as_str).collect();
+    let mut merged: Vec<(String, String)> = Vec::new();
 
     for key in keys {
         let (lt, rt, bt) = (l.get(key).map(String::as_str), r.get(key).map(String::as_str), b.get(key).map(String::as_str));
-        let m = merge3(bt, lt, rt);
-        if m.text.as_deref() != lt {
-            put(local, key, m.text.as_deref()).await?;
+        let m = merge_note(key, bt, lt, rt, gestalts, now);
+        let Some(text) = m.text.as_deref() else { continue };
+        if Some(text) != lt {
+            local.write_note(key, text).await?;
             report.pulled.push(key.to_owned());
         }
-        if m.text.as_deref() != rt {
-            put(remote, key, m.text.as_deref()).await?;
+        if Some(text) != rt {
+            remote.write_note(key, text).await?;
             report.pushed.push(key.to_owned());
         }
-        if m.text.as_deref() != bt {
-            put(base, key, m.text.as_deref()).await?;
+        if Some(text) != bt {
+            base.write_note(key, text).await?;
         }
-        if let Some(c) = m.conflict {
-            let ck = format!("{key}.conflict-{tag}");
-            for s in [local, remote, base] {
-                s.write_note(&ck, &c).await?;
+        merged.push((key.to_owned(), text.to_owned()));
+        let id = Note::parse(key, text).id().to_owned();
+        for c in &m.conflicts {
+            let (ck, ct) = conflict_note(key, &id, c, m.raw, now);
+            // recorded earlier (by this or another device): keep that record
+            let known = [&l, &r, &b].iter().any(|s| s.contains_key(&ck));
+            if !known {
+                for s in [local, remote, base] {
+                    s.write_note(&ck, &ct).await?;
+                }
+                merged.push((ck.clone(), ct));
+                report.conflicts.push(ck);
             }
-            report.conflicts.push(ck);
         }
     }
 
     step("merge_notes");
 
+    // only blobs a merged note uses go over, so collecting on one side isn't undone by the other
+    let used = crate::blobs::referenced_blobs(merged.iter().map(|(k, t)| (k.as_str(), t.as_str())), gestalts);
     let (lb, rb) = (local.list_blobs().await?, remote.list_blobs().await?);
-    for name in rb.iter().filter(|n| !lb.contains(n)) {
+    for name in rb.iter().filter(|n| !lb.contains(n) && used.contains(*n)) {
         if let Some(bytes) = remote.read_blob(name).await? {
             local.write_blob(name, &bytes).await?;
             report.blobs_pulled.push(name.clone());
         }
     }
-    for name in lb.iter().filter(|n| !rb.contains(n)) {
+    for name in lb.iter().filter(|n| !rb.contains(n) && used.contains(*n)) {
         if let Some(bytes) = local.read_blob(name).await? {
             remote.write_blob(name, &bytes).await?;
             report.blobs_pushed.push(name.clone());
@@ -183,161 +317,5 @@ pub async fn sync_with(local: &dyn Storage, remote: &dyn Storage, base: &dyn Sto
     Ok(report)
 }
 
-async fn put(s: &dyn Storage, key: &str, text: Option<&str>) -> Result<()> {
-    match text {
-        Some(t) => s.write_note(key, t).await,
-        None => s.delete_note(key).await,
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::storage::Memory;
-
-    fn m(b: Option<&str>, l: Option<&str>, r: Option<&str>) -> Merged {
-        merge3(b, l, r)
-    }
-
-    #[test]
-    fn one_side_changed() {
-        assert_eq!(m(Some("a: 1"), Some("a: 2"), Some("a: 1")).text.as_deref(), Some("a: 2"));
-        assert_eq!(m(Some("a: 1"), Some("a: 1"), Some("a: 3")).text.as_deref(), Some("a: 3"));
-        assert_eq!(m(None, None, Some("new: 1")).text.as_deref(), Some("new: 1"));
-        assert_eq!(m(Some("a: 1"), None, Some("a: 1")).text, None);
-        assert_eq!(m(Some("a: 1"), Some("a: 1"), None).text, None);
-    }
-
-    #[test]
-    fn both_changed_different_keys_merge() {
-        let r = m(Some("a: 1\nb: 1\n"), Some("a: 2\nb: 1\n"), Some("a: 1\nb: 3\nc: 4\n"));
-        assert_eq!(r.text.as_deref(), Some("a: 2\nb: 3\nc: 4\n"));
-        assert_eq!(r.conflict, None);
-        // a key removed on one side
-        let r = m(Some("a: 1\nb: 1\n"), Some("a: 1\n"), Some("a: 1\nb: 1\nc: 1\n"));
-        assert_eq!(r.text.as_deref(), Some("a: 1\nc: 1\n"));
-    }
-
-    #[test]
-    fn same_key_conflicts_local_wins() {
-        let r = m(Some("a: 1\nb: 1\n"), Some("a: 2\nb: 1\n"), Some("a: 3\nb: 5\n"));
-        assert_eq!(r.text.as_deref(), Some("a: 2\nb: 5\n"));
-        assert_eq!(r.conflict.as_deref(), Some("a: 3\nb: 5\n"));
-    }
-
-    #[test]
-    fn edit_beats_delete() {
-        assert_eq!(m(Some("a: 1"), None, Some("a: 2")).text.as_deref(), Some("a: 2"));
-        assert_eq!(m(Some("a: 1"), Some("a: 2"), None).text.as_deref(), Some("a: 2"));
-    }
-
-    #[test]
-    fn unparseable_or_no_base_local_wins() {
-        let r = m(Some("a: 1"), Some("a: [x"), Some("a: 2"));
-        assert_eq!(r.text.as_deref(), Some("a: [x"));
-        assert_eq!(r.conflict.as_deref(), Some("a: 2"));
-        let r = m(None, Some("a: 1"), Some("a: 2"));
-        assert_eq!(r.text.as_deref(), Some("a: 1"));
-        assert!(r.conflict.is_some());
-    }
-
-    #[test]
-    fn identical_edits_are_no_conflict() {
-        assert_eq!(m(Some("a: 1"), Some("a: 2"), Some("a: 2")), Merged { text: Some("a: 2".into()), conflict: None });
-    }
-
-    #[test]
-    fn set_keys_merge_as_sets() {
-        // both add: local order, then remote additions
-        let r = m(Some("relationships: [a]\n"), Some("relationships: [a, b]\n"), Some("relationships: [a, c]\n"));
-        assert_eq!(r.text.as_deref(), Some("relationships:\n- a\n- b\n- c\n"));
-        assert_eq!(r.conflict, None);
-        // one removes, the other adds
-        let r = m(Some("tags: [x, y]\n"), Some("tags: [y]\n"), Some("tags: [x, y, z]\n"));
-        assert_eq!(r.text.as_deref(), Some("tags:\n- y\n- z\n"));
-        // both add the same item, and remote removes what local kept
-        let r = m(Some("tags: [x]\n"), Some("tags: [x, n]\n"), Some("tags: [n]\n"));
-        assert_eq!(r.text.as_deref(), Some("tags:\n- n\n"));
-        // labelled items compare whole
-        let r = m(
-            Some("blobs: [{file: a.webp, label: x}]\n"),
-            Some("blobs: [{file: a.webp, label: y}]\n"),
-            Some("blobs: [{file: a.webp, label: x}, b.webp]\n"),
-        );
-        assert_eq!(r.text.as_deref(), Some("blobs:\n- file: a.webp\n  label: y\n- b.webp\n"));
-        assert_eq!(r.conflict, None);
-    }
-
-    #[test]
-    fn set_keys_missing_or_not_lists() {
-        // no base key, both add
-        let r = m(Some("a: 1\n"), Some("a: 1\ntags: [x]\n"), Some("a: 1\ntags: [y]\n"));
-        assert_eq!(r.text.as_deref(), Some("a: 1\ntags:\n- x\n- y\n"));
-        // local dropped the key, remote added to it
-        let r = m(Some("tags: [x]\n"), Some("{}\n"), Some("tags: [x, y]\n"));
-        assert_eq!(r.text.as_deref(), Some("tags:\n- y\n"));
-        // local dropped the key, remote removed the rest: stays dropped
-        let r = m(Some("a: 1\ntags: [x, y]\n"), Some("a: 1\n"), Some("a: 1\ntags: [x]\n"));
-        assert_eq!(r.text.as_deref(), Some("a: 1\n"));
-        assert_eq!(r.conflict, None);
-        // not a list: a conflict as before
-        let r = m(Some("tags: [x]\n"), Some("tags: foo\n"), Some("tags: [x, y]\n"));
-        assert_eq!(r.text.as_deref(), Some("tags: foo\n"));
-        assert!(r.conflict.is_some());
-    }
-
-    #[test]
-    fn set_key_merges_beside_a_conflict() {
-        let r = m(Some("a: 1\ntags: [x]\n"), Some("a: 2\ntags: [x, l]\n"), Some("a: 3\ntags: [x, r]\n"));
-        assert_eq!(r.text.as_deref(), Some("a: 2\ntags:\n- x\n- l\n- r\n"));
-        assert_eq!(r.conflict.as_deref(), Some("a: 3\ntags: [x, r]\n"));
-    }
-
-    #[test]
-    fn sync_converges() {
-        pollster::block_on(async {
-            let (l, r, b) = (Memory::default(), Memory::default(), Memory::default());
-            l.write_note("only-local", "x: 1").await.unwrap();
-            r.write_note("only-remote", "y: 1").await.unwrap();
-            r.write_blob("img.webp", b"123").await.unwrap();
-            let rep = sync(&l, &r, &b, "t1").await.unwrap();
-            assert_eq!(rep.pulled, vec!["only-remote"]);
-            assert_eq!(rep.pushed, vec!["only-local"]);
-            assert_eq!(rep.blobs_pulled, vec!["img.webp"]);
-
-            // now both edit the same note, different keys; one deletes another
-            l.write_note("only-local", "x: 2\nz: 1").await.unwrap();
-            r.write_note("only-local", "x: 1\nw: 1").await.unwrap();
-            r.delete_note("only-remote").await.unwrap();
-            let rep = sync(&l, &r, &b, "t2").await.unwrap();
-            assert!(rep.conflicts.is_empty());
-            let merged = l.read_note("only-local").await.unwrap().unwrap();
-            assert_eq!(merged, "x: 2\nz: 1\nw: 1\n");
-            assert_eq!(r.read_note("only-local").await.unwrap().unwrap(), merged);
-            assert_eq!(l.read_note("only-remote").await.unwrap(), None);
-
-            // a real conflict
-            l.write_note("only-local", "x: 3").await.unwrap();
-            r.write_note("only-local", "x: 4").await.unwrap();
-            let rep = sync(&l, &r, &b, "t3").await.unwrap();
-            assert_eq!(rep.conflicts, vec!["only-local.conflict-t3"]);
-            assert_eq!(r.read_note("only-local").await.unwrap().as_deref(), Some("x: 3"));
-            assert_eq!(l.read_note("only-local.conflict-t3").await.unwrap().as_deref(), Some("x: 4"));
-
-            // both add a relationship: merged, no conflict note
-            l.write_note("rel", "relationships: [a]").await.unwrap();
-            sync(&l, &r, &b, "t4").await.unwrap();
-            l.write_note("rel", "relationships: [a, b]").await.unwrap();
-            r.write_note("rel", "relationships: [a, {to: c, label: on-canvas}]").await.unwrap();
-            let rep = sync(&l, &r, &b, "t5").await.unwrap();
-            assert!(rep.conflicts.is_empty());
-            let merged = "relationships:\n- a\n- b\n- to: c\n  label: on-canvas\n";
-            assert_eq!(l.read_note("rel").await.unwrap().as_deref(), Some(merged));
-            assert_eq!(r.read_note("rel").await.unwrap().as_deref(), Some(merged));
-
-            // nothing changed: a no-op
-            let rep = sync(&l, &r, &b, "t6").await.unwrap();
-            assert!(rep.pulled.is_empty() && rep.pushed.is_empty() && rep.conflicts.is_empty());
-        });
-    }
-}
+mod tests;

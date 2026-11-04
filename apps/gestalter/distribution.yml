@@ -1,0 +1,4 @@
+# The Gestalter: the host with every plugin; tabs are pane notes, seeded with these
+plugins: [explorer, canvas, typst, sources, learn, quotes, greek-alphabet]
+default_panes: [explorer/explorer, explorer/new, canvas/canvas, typst/canvas2typ, sources/sources, learn/learn, quotes/quotes, greek-alphabet/practice]
+install_ui: true

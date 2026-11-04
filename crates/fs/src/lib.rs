@@ -108,6 +108,13 @@ impl FsStorage {
     pub fn write_blob_sync(&self, name: &str, bytes: &[u8]) -> Result<()> {
         write_atomic(&self.blob_path(name)?, bytes)
     }
+
+    pub fn delete_blob_sync(&self, name: &str) -> Result<()> {
+        match fs::remove_file(self.blob_path(name)?) {
+            Err(e) if e.kind() != ErrorKind::NotFound => Err(io(e)),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -132,6 +139,9 @@ impl Storage for FsStorage {
     }
     async fn write_blob(&self, name: &str, bytes: &[u8]) -> Result<()> {
         self.write_blob_sync(name, bytes)
+    }
+    async fn delete_blob(&self, name: &str) -> Result<()> {
+        self.delete_blob_sync(name)
     }
 }
 

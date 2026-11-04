@@ -1,41 +1,58 @@
 import { defineConfig } from 'oxlint';
 
 /**
- * UI layers (packages/ui/src) may only import from below:
- * panes > perspectives > widgets > components > primitives.
- * Perspectives don't import each other (except the shared `define` slice), and panes see
- * perspectives only through their index.
- * Every layer may use @gestalts/client and external packages. `debug` (error boundary, log button) is for app
- * shells and uses nothing else.
+ * Who may import whom (eslint-plugin-boundaries):
+ * - `@gestalts/sdk` (the perspective port) imports nothing of ours; `@gestalts/learning` only the sdk.
+ * - `@gestalts/kit` imports only the sdk, in layers: primitives < components < widgets < views.
+ * - plugins (`plugins/<id>/ui`) import only the sdk, the kit (its index) and learning, never another plugin, the
+ *   client or the host. That keeps them movable to repos of their own.
+ * - `@gestalts/client` (the core in the browser) builds on the sdk; the host (`packages/ui`) on client, sdk and kit.
+ * - apps use the host, and load plugins only through `virtual:gestalts-plugins`.
+ * External packages are always fine.
  */
-const ui = 'packages/ui/src';
-const below: Record<string, string[]> = {
+const kit = 'packages/kit/src';
+const host = 'packages/ui/src';
+const kitBelow: Record<string, string[]> = {
   primitive: [],
-  debug: [],
   component: ['primitive'],
   widget: ['component', 'primitive'],
-  perspective: ['widget', 'component', 'primitive'],
-  'perspective-index': ['perspective'],
-  pane: ['perspective-index'],
+  view: ['widget', 'component', 'primitive'],
+  'kit-index': ['view', 'widget', 'component', 'primitive'],
+};
+const allowed: Record<string, string[]> = {
+  sdk: [],
+  learning: ['sdk'],
+  client: ['sdk'],
+  ...Object.fromEntries(Object.entries(kitBelow).map(([t, below]) => [t, ['sdk', ...below]])),
+  plugin: ['sdk', 'kit-index', 'learning'],
+  debug: ['client', 'sdk'],
+  host: ['client', 'sdk', 'kit-index', 'debug'],
+  'host-perspective': ['client', 'sdk', 'kit-index'],
+  app: ['client', 'sdk', 'host', 'host-perspective', 'debug'],
 };
 
 export default defineConfig({
-  ignorePatterns: ['**/dist', 'packages/client/wasm'],
+  ignorePatterns: ['**/dist', 'packages/client/wasm', '**/node_modules'],
   plugins: ['typescript', 'react', 'oxc', 'unicorn'],
   jsPlugins: [{ name: 'react-hooks-js', specifier: 'eslint-plugin-react-hooks' }, 'eslint-plugin-boundaries'],
   categories: { correctness: 'error' },
   settings: {
-    'import/resolver': { typescript: { project: ['packages/*/tsconfig.json', 'apps/*/tsconfig.json'] }, node: true },
+    'import/resolver': { typescript: { project: ['packages/*/tsconfig.json', 'apps/*/tsconfig.json', 'plugins/*/ui/tsconfig.json'] }, node: true },
     'boundaries/elements': [
+      { type: 'sdk', pattern: 'packages/sdk/src' },
+      { type: 'learning', pattern: 'packages/learning/src' },
       { type: 'client', pattern: 'packages/client/src' },
-      { type: 'primitive', pattern: `${ui}/primitives` },
-      { type: 'component', pattern: `${ui}/components` },
-      { type: 'widget', pattern: `${ui}/widgets` },
-      { type: 'perspective', pattern: `${ui}/perspectives/*`, capture: ['slice'] },
-      // files directly in perspectives/: the index panes import
-      { type: 'perspective-index', pattern: `${ui}/perspectives` },
-      { type: 'pane', pattern: `${ui}/panes` },
-      { type: 'debug', pattern: `${ui}/debug` },
+      { type: 'primitive', pattern: `${kit}/primitives` },
+      { type: 'component', pattern: `${kit}/components` },
+      { type: 'widget', pattern: `${kit}/widgets` },
+      { type: 'view', pattern: `${kit}/views` },
+      // files directly in packages/kit/src: the index plugins import
+      { type: 'kit-index', pattern: kit },
+      { type: 'plugin', pattern: 'plugins/*/ui/src', capture: ['plugin'] },
+      { type: 'debug', pattern: `${host}/debug` },
+      { type: 'host', pattern: `${host}/host` },
+      { type: 'host-perspective', pattern: `${host}/perspectives` },
+      { type: 'app', pattern: 'apps/*/src', capture: ['app'] },
     ],
   },
   rules: {
@@ -46,18 +63,16 @@ export default defineConfig({
     'react-hooks-js/refs': 'error',
   },
   overrides: [{
-    files: [`${ui}/**/*.{ts,tsx}`],
+    files: ['packages/*/src/**/*.{ts,tsx}', 'plugins/*/ui/src/**/*.{ts,tsx}', 'apps/*/src/**/*.{ts,tsx}'],
     rules: {
       'boundaries/no-unknown-files': 'error',
       'boundaries/dependencies': ['error', {
         default: 'disallow',
         policies: [
           { allow: { dependency: { relationship: { to: 'internal' } } } },
-          { allow: { to: { element: { type: 'client' } } } },
-          { from: { element: { type: 'perspective' } }, allow: { to: { element: { type: 'perspective', captured: { slice: 'define' } } } } },
-          ...Object.entries(below).map(([type, allowed]) => ({
+          ...Object.entries(allowed).map(([type, to]) => ({
             from: { element: { type } },
-            allow: { to: { element: { types: { anyOf: allowed.length ? allowed : ['none'] } } } },
+            allow: { to: { element: { types: { anyOf: to.length ? to : ['none'] } } } },
           })),
         ],
       }],

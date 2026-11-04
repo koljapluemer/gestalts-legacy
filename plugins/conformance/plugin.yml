@@ -1,7 +1,9 @@
-schema: 1
+schema: 2
 id: conformance
 version: 0.1.0
-gestalts: []
+host_api: 1
+title: Conformance
+description: Exercises the worker contract.
 worker:
   runtime: uv
   project: worker

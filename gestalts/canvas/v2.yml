@@ -22,3 +22,6 @@ fields:
             y: { type: number, required: true }
             text: { type: text }
             note: { type: string }
+merge:
+  keys:
+    canvas: { keys: { nodes: { list_by: id, item: { keys: { text: text } } } } }

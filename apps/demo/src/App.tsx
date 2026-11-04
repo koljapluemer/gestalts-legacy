@@ -1,20 +1,21 @@
 import { useEffect } from 'react';
 import { Settings } from 'lucide-react';
-import { logger, RepoProvider, useOpenRepo } from '@gestalts/client';
-import { DebugLogButton, ErrorBoundary } from '@gestalts/ui/debug';
-import { GreekAlphabetPane } from '@gestalts/ui/panes';
+import { distribution, plugins } from 'virtual:gestalts-plugins';
+import { logger, RepoProvider } from '@gestalts/client';
+import { DebugLogButton } from '@gestalts/ui/debug';
+import { SinglePane, usePluginRepo } from '@gestalts/ui/host';
 import { ConnectorSettings } from '@gestalts/ui/perspectives';
 
 /**
- * Shipped words come from public/gestalt-data. A word is copied into this browser (OPFS) with the
- * learner's progress once it is first rated, so the learner's data stands on its own.
+ * The host with the greek-alphabet plugin. Its deck is read-only; a word is copied into this browser (OPFS) with
+ * the learner's progress once it is first rated, so the learner's data stands on its own.
  */
 const log = logger('demo');
 
-const SOURCE = { kind: 'layered', staticBase: new URL('gestalt-data', document.baseURI).href, dir: 'demo' } as const;
+const REGISTRY = { distribution, plugins };
 
 export function App() {
-  const { repo, error } = useOpenRepo(SOURCE);
+  const { repo, error } = usePluginRepo('demo', REGISTRY);
   useEffect(() => {
     const r = repo?.upstreamReport();
     if (r && (r.copied.length || r.updated.length || r.diverged.length)) log.info('deck update', { copied: r.copied, updated: r.updated, diverged: r.diverged });
@@ -36,7 +37,7 @@ export function App() {
       <main className="flex-1">
         {error && <div role="alert" className="alert alert-error m-4">Could not load: {error}</div>}
         {!error && !repo && <div className="flex justify-center p-8"><span className="loading loading-spinner" /></div>}
-        {repo && <RepoProvider repo={repo}><ErrorBoundary name="Greek alphabet"><GreekAlphabetPane /></ErrorBoundary></RepoProvider>}
+        {repo && <RepoProvider repo={repo}><SinglePane registry={REGISTRY} paneRef={distribution.default_panes[0]} /></RepoProvider>}
       </main>
       <footer className="p-4 text-center text-xs text-base-content/50">Pronunciation generated with espeak-ng. Your progress is stored only in this browser.</footer>
     </div>

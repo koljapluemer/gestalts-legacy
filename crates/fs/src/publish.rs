@@ -67,6 +67,9 @@ pub fn publish(root: &Path) -> Result<PublishReport> {
         if note.parse_error.is_some() {
             report.problems.push(format!("{key}: doesn't parse"));
         }
+        if note.value.as_ref().is_some_and(gestalts_core::is_tombstone) {
+            report.problems.push(format!("{key}: is deleted; decks never delete notes, they retire them (tag `retired`)"));
+        }
         if note.get("upstream").is_some() {
             report.problems.push(format!("{key}: has an `upstream` field, which copies in user space get"));
         }

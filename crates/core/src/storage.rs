@@ -28,6 +28,8 @@ pub trait Storage {
     async fn list_blobs(&self) -> Result<Vec<String>>;
     async fn read_blob(&self, name: &str) -> Result<Option<Vec<u8>>>;
     async fn write_blob(&self, name: &str, bytes: &[u8]) -> Result<()>;
+    /// deleting a missing blob is not an error
+    async fn delete_blob(&self, name: &str) -> Result<()>;
 
     /// Every note at once; adapters with a bulk endpoint override this.
     async fn read_all_notes(&self) -> Result<Vec<(String, String)>> {
@@ -50,55 +52,99 @@ pub fn note_key_from_file(file: &str) -> Option<&str> {
     file.strip_suffix(".yml").filter(|k| valid_key(k))
 }
 
-/// Reads from `top`, falling back to `base`; writes go to `top` only.
-/// Used for read-only shipped content (`base`) plus the user's own notes (`top`).
-/// Copy-on-write: a note written to `top` pulls the `base` notes it references into `top`
-/// (see [`crate::upstream`]), tagged with `source`.
-pub struct Layered<B, T> {
-    pub base: B,
-    pub top: T,
+/// A read-only deck under a [`Layered`] storage: its `source` id, earlier ids (`aliases`), and its notes.
+pub struct Deck<B> {
     pub source: String,
+    pub aliases: Vec<String>,
+    pub storage: B,
+}
+
+/// Reads from `top`, falling back to the decks in order; writes go to `top` only.
+/// Used for read-only shipped content (decks) plus the user's own notes (`top`). A tombstone in `top` hides the deck
+/// note under it.
+/// Copy-on-write: a note written to `top` pulls the deck notes it references into `top` (see [`crate::upstream`]),
+/// tagged with their deck's `source`.
+pub struct Layered<B, T> {
+    pub decks: Vec<Deck<B>>,
+    pub top: T,
+}
+
+impl<B: Storage, T> Layered<B, T> {
+    pub fn deck_refs(&self) -> Vec<crate::upstream::DeckRef<'_>> {
+        self.decks.iter().map(|d| crate::upstream::DeckRef { source: &d.source, aliases: &d.aliases, storage: &d.storage }).collect()
+    }
 }
 
 #[async_trait(?Send)]
 impl<B: Storage, T: Storage> Storage for Layered<B, T> {
     async fn list_notes(&self) -> Result<Vec<String>> {
-        Ok(union(self.base.list_notes().await?, self.top.list_notes().await?))
+        let mut all = self.top.list_notes().await?;
+        for d in &self.decks {
+            all = union(all, d.storage.list_notes().await?);
+        }
+        Ok(all)
     }
     async fn read_note(&self, key: &str) -> Result<Option<String>> {
-        match self.top.read_note(key).await? {
-            Some(t) => Ok(Some(t)),
-            None => self.base.read_note(key).await,
+        if let Some(t) = self.top.read_note(key).await? {
+            return Ok(Some(t));
         }
+        for d in &self.decks {
+            if let Some(t) = d.storage.read_note(key).await? {
+                return Ok(Some(t));
+            }
+        }
+        Ok(None)
     }
     async fn write_note(&self, key: &str, text: &str) -> Result<()> {
         self.top.write_note(key, text).await?;
-        crate::upstream::copy_up_refs(&self.base, &self.top, &self.source, key, text).await?;
+        crate::upstream::copy_up_refs(&self.deck_refs(), &self.top, key, text).await?;
         Ok(())
     }
     async fn delete_note(&self, key: &str) -> Result<()> {
-        if self.top.read_note(key).await?.is_none() && self.base.read_note(key).await?.is_some() {
-            return Err(StorageError::ReadOnly);
+        if self.top.read_note(key).await?.is_none() {
+            for d in &self.decks {
+                if d.storage.read_note(key).await?.is_some() {
+                    return Err(StorageError::ReadOnly);
+                }
+            }
         }
         self.top.delete_note(key).await
     }
     async fn list_blobs(&self) -> Result<Vec<String>> {
-        Ok(union(self.base.list_blobs().await?, self.top.list_blobs().await?))
+        let mut all = self.top.list_blobs().await?;
+        for d in &self.decks {
+            all = union(all, d.storage.list_blobs().await?);
+        }
+        Ok(all)
     }
     async fn read_blob(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        match self.top.read_blob(name).await? {
-            Some(b) => Ok(Some(b)),
-            None => self.base.read_blob(name).await,
+        if let Some(b) = self.top.read_blob(name).await? {
+            return Ok(Some(b));
         }
+        for d in &self.decks {
+            if let Some(b) = d.storage.read_blob(name).await? {
+                return Ok(Some(b));
+            }
+        }
+        Ok(None)
     }
     async fn write_blob(&self, name: &str, bytes: &[u8]) -> Result<()> {
         self.top.write_blob(name, bytes).await
     }
+    /// From `top` only: decks are never collected.
+    async fn delete_blob(&self, name: &str) -> Result<()> {
+        self.top.delete_blob(name).await
+    }
     async fn read_all_notes(&self) -> Result<Vec<(String, String)>> {
-        let top = self.top.read_all_notes().await?;
-        let mut out = self.base.read_all_notes().await?;
-        out.retain(|(k, _)| !top.iter().any(|(t, _)| t == k));
-        out.extend(top);
+        let mut out = self.top.read_all_notes().await?;
+        let mut seen: std::collections::HashSet<String> = out.iter().map(|(k, _)| k.clone()).collect();
+        for d in &self.decks {
+            for (k, t) in d.storage.read_all_notes().await? {
+                if seen.insert(k.clone()) {
+                    out.push((k, t));
+                }
+            }
+        }
         Ok(out)
     }
 }
@@ -147,6 +193,10 @@ impl Storage for Memory {
         self.blobs.borrow_mut().insert(name.into(), bytes.into());
         Ok(())
     }
+    async fn delete_blob(&self, name: &str) -> Result<()> {
+        self.blobs.borrow_mut().remove(name);
+        Ok(())
+    }
 }
 
 macro_rules! forward_storage {
@@ -160,6 +210,7 @@ macro_rules! forward_storage {
             async fn list_blobs(&self) -> Result<Vec<String>> { (**self).list_blobs().await }
             async fn read_blob(&self, name: &str) -> Result<Option<Vec<u8>>> { (**self).read_blob(name).await }
             async fn write_blob(&self, name: &str, bytes: &[u8]) -> Result<()> { (**self).write_blob(name, bytes).await }
+            async fn delete_blob(&self, name: &str) -> Result<()> { (**self).delete_blob(name).await }
             async fn read_all_notes(&self) -> Result<Vec<(String, String)>> { (**self).read_all_notes().await }
         }
     };
@@ -178,12 +229,30 @@ mod tests {
             base.write_note("c", "title: x\nblobs: [a.mp3]\n").await.unwrap();
             base.write_note("unused", "title: y\n").await.unwrap();
             base.write_blob("a.mp3", &[1]).await.unwrap();
-            let l = Layered { base, top: Memory::default(), source: "demo".into() };
+            let l = Layered { decks: vec![Deck { source: "demo".into(), aliases: vec![], storage: base }], top: Memory::default() };
             l.write_note("s", "relationships: [{to: c, label: reviews}]\n").await.unwrap();
             assert_eq!(l.top.list_notes().await.unwrap(), vec!["c", "s"]);
             assert_eq!(l.top.list_blobs().await.unwrap(), vec!["a.mp3"]);
             assert!(l.read_note("c").await.unwrap().unwrap().contains("source: demo"));
             assert_eq!(l.list_notes().await.unwrap().len(), 3);
+        });
+    }
+
+    #[test]
+    fn a_tombstone_in_top_hides_the_deck_note() {
+        pollster::block_on(async {
+            let base = Memory::default();
+            base.write_note("c", "title: x\n").await.unwrap();
+            let repo = crate::Repo::new(Layered { decks: vec![Deck { source: "demo".into(), aliases: vec![], storage: base }], top: Memory::default() }, crate::Gestalts::builtin());
+            repo.load().await.unwrap();
+            repo.delete("c", "2026-11-04T10:00:00Z").await.unwrap();
+            repo.load().await.unwrap();
+            assert!(repo.get("c").is_none());
+            // a note referencing it doesn't copy it back, and neither does pulling upstream
+            repo.put_raw("s", "relationships: [{to: c, label: reviews}]\n").await.unwrap();
+            let s = repo.storage();
+            crate::pull_upstream(&s.deck_refs(), &s.top).await.unwrap();
+            assert!(crate::is_tombstone_text(&s.top.read_note("c").await.unwrap().unwrap()));
         });
     }
 }

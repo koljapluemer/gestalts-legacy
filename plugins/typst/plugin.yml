@@ -1,7 +1,16 @@
-schema: 1
+schema: 2
 id: typst
-version: 0.1.0
-gestalts: []
+version: 0.2.0
+host_api: 1
+title: Typst
+description: Typst documents beside a note's canvas, compiled by the connector.
+gestalts: [typst-document@1]
+uses: [canvas@1, canvas@2, source@1]
+panes:
+  - { id: canvas2typ, title: Canvas2Typ, entry: ui/src/index.ts#Canvas2TypPane }
+access:
+  read: all
+  write: all
 worker:
   runtime: uv
   project: worker

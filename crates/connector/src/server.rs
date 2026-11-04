@@ -171,9 +171,9 @@ async fn worker_access(headers: &HeaderMap, state: &AppState) -> Result<Option<g
     state.plugins.policy_for_token(token).await.map(Some).ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())
 }
 
-fn readable(access: &gestalts_plugin_host::Access, key: &str, text: &str) -> bool {
+fn readable(gestalts: &gestalts_core::Gestalts, access: &gestalts_plugin_host::Access, key: &str, text: &str) -> bool {
     let note = gestalts_core::Note::parse(key, text);
-    let gs = gestalts_core::Gestalts::builtin().of(&note);
+    let gs = gestalts.of(&note);
     access.read.gestalts.iter().any(|g| gs.contains(g)) && access.read.tags_all.iter().all(|t| note.has_tag(t))
 }
 
@@ -188,7 +188,7 @@ async fn list_notes(State(state): State<AppState>, headers: HeaderMap) -> Result
     let mut out = Vec::new();
     for key in api(s.list_notes_sync())? {
         if let Some(text) = api(s.read_note_sync(&key))?
-            && access.as_ref().is_none_or(|a| readable(a, &key, &text)) {
+            && access.as_ref().is_none_or(|a| readable(state.plugins.gestalts(), a, &key, &text)) {
             out.push(NoteEntry { key, text });
         }
     }
@@ -199,7 +199,7 @@ async fn read_note(State(state): State<AppState>, UrlPath(key): UrlPath<String>,
     let s = state.store()?;
     let access = worker_access(&headers, &state).await?;
     Ok(match api(s.read_note_sync(&key))? {
-        Some(t) if access.as_ref().is_none_or(|a| readable(a, &key, &t)) => ([(header::CONTENT_TYPE, "application/yaml; charset=utf-8")], t).into_response(),
+        Some(t) if access.as_ref().is_none_or(|a| readable(state.plugins.gestalts(), a, &key, &t)) => ([(header::CONTENT_TYPE, "application/yaml; charset=utf-8")], t).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     })
 }
@@ -223,16 +223,27 @@ async fn delete_note(State(state): State<AppState>, UrlPath(key): UrlPath<String
         let old = api(s.read_note_sync(&key))?;
         if old.as_ref().is_none_or(|text| !writable(a, &key, text)) { return Err(StatusCode::FORBIDDEN.into_response()); }
     }
-    api(s.delete_note_sync(&key))?;
+    // a delete is a tombstone, so it syncs like any other change (doc/connector.md#sync)
+    let Some(old) = api(s.read_note_sync(&key))? else { return Ok(StatusCode::NO_CONTENT) };
+    if gestalts_core::is_tombstone_text(&old) { return Ok(StatusCode::NO_CONTENT); }
+    let id = gestalts_core::Note::parse(key.clone(), old).id().to_owned();
+    let tomb = gestalts_core::tombstone(&id, &now_iso());
+    api(s.write_note_sync(&key, &tomb))?;
+    state.plugins.note_changed(&key, &tomb).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub(crate) fn now_iso() -> String {
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    gestalts_core::iso_datetime(ms)
+}
+
 /// Blobs referenced by notes this worker may read.
-fn referenced_blobs(s: &FsStorage, access: &gestalts_plugin_host::Access) -> Result<std::collections::BTreeSet<String>, Response> {
+fn referenced_blobs(s: &FsStorage, gestalts: &gestalts_core::Gestalts, access: &gestalts_plugin_host::Access) -> Result<std::collections::BTreeSet<String>, Response> {
     let mut names = std::collections::BTreeSet::new();
     if access.blobs.read != gestalts_plugin_host::BlobRead::Referenced { return Ok(names); }
     for key in api(s.list_notes_sync())? {
-        if let Some(text) = api(s.read_note_sync(&key))? && readable(access, &key, &text) {
+        if let Some(text) = api(s.read_note_sync(&key))? && readable(gestalts, access, &key, &text) {
             names.extend(gestalts_core::Note::parse(key, text).blobs().into_iter().map(|b| b.target));
         }
     }
@@ -242,7 +253,7 @@ fn referenced_blobs(s: &FsStorage, access: &gestalts_plugin_host::Access) -> Res
 async fn list_blobs(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<String>>, Response> {
     let s = state.store()?;
     Ok(Json(match worker_access(&headers, &state).await? {
-        Some(access) => referenced_blobs(&s, &access)?.into_iter().collect(),
+        Some(access) => referenced_blobs(&s, state.plugins.gestalts(), &access)?.into_iter().collect(),
         None => api(s.list_blobs_sync())?,
     }))
 }
@@ -250,7 +261,7 @@ async fn list_blobs(State(state): State<AppState>, headers: HeaderMap) -> Result
 async fn read_blob(State(state): State<AppState>, UrlPath(name): UrlPath<String>, headers: HeaderMap) -> Result<Response, Response> {
     let s = state.store()?;
     if let Some(access) = worker_access(&headers, &state).await?
-        && !referenced_blobs(&s, &access)?.contains(&name) { return Err(StatusCode::NOT_FOUND.into_response()); }
+        && !referenced_blobs(&s, state.plugins.gestalts(), &access)?.contains(&name) { return Err(StatusCode::NOT_FOUND.into_response()); }
     Ok(match api(s.read_blob_sync(&name))? {
         Some(b) => ([(header::CONTENT_TYPE, mime_guess::from_path(&name).first_or_octet_stream().to_string())], b).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -262,6 +273,46 @@ async fn write_blob(State(state): State<AppState>, UrlPath(name): UrlPath<String
     if worker_access(&headers, &state).await?.is_some_and(|a| !a.blobs.write) { return Err(StatusCode::FORBIDDEN.into_response()); }
     api(s.write_blob_sync(&name, &body))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Apps only: workers never delete blobs. Deleting one a note still uses is the caller's mistake to avoid.
+async fn delete_blob(State(state): State<AppState>, UrlPath(name): UrlPath<String>, headers: HeaderMap) -> Result<StatusCode, Response> {
+    let s = state.store()?;
+    if worker_access(&headers, &state).await?.is_some() { return Err(StatusCode::FORBIDDEN.into_response()); }
+    api(s.delete_blob_sync(&name))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct Collected { deleted: Vec<String> }
+
+/// Collects the folder's unreferenced blobs (`gestalts_core::blobs`); an app calls it after each successful sync.
+/// The manifest of what has been unreferenced since when is `.gestalts/blob-gc.json`.
+async fn collect_blobs(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Collected>, Response> {
+    let s = state.store()?;
+    if worker_access(&headers, &state).await?.is_some() { return Err(StatusCode::FORBIDDEN.into_response()); }
+    let plugins = state.plugins.clone();
+    let deleted = tokio::task::spawn_blocking(move || collect_folder(&s, plugins.gestalts()))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
+    Ok(Json(Collected { deleted: api(deleted)? }))
+}
+
+fn collect_folder(s: &FsStorage, gestalts: &gestalts_core::Gestalts) -> gestalts_core::storage::Result<Vec<String>> {
+    let mut notes = Vec::new();
+    for key in s.list_notes_sync()? {
+        if let Some(text) = s.read_note_sync(&key)? {
+            notes.push((key, text));
+        }
+    }
+    let referenced = gestalts_core::referenced_blobs(notes.iter().map(|(k, t)| (k.as_str(), t.as_str())), gestalts);
+    let file = s.root().join(".gestalts").join("blob-gc.json");
+    let mut manifest: gestalts_core::GcManifest = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    let deleted = pollster::block_on(gestalts_core::collect_blobs(s, &referenced, &mut manifest, now))?;
+    let json = serde_json::to_vec_pretty(&manifest).map_err(|e| StorageError::Io(e.to_string()))?;
+    crate::paths::write_atomic(&file, &json).map_err(|e| StorageError::Io(e.to_string()))?;
+    Ok(deleted)
 }
 
 async fn list_plugins(State(s): State<AppState>) -> Json<Vec<PluginView>> { Json(s.plugins.views().await) }
@@ -389,7 +440,8 @@ pub fn app(state: AppState) -> Router {
         .route("/notes", get(list_notes))
         .route("/notes/{key}", get(read_note).put(write_note).delete(delete_note))
         .route("/blobs", get(list_blobs))
-        .route("/blobs/{name}", get(read_blob).put(write_blob))
+        .route("/blobs/collect", post(collect_blobs))
+        .route("/blobs/{name}", get(read_blob).put(write_blob).delete(delete_blob))
         .route("/plugins", get(list_plugins))
         .route("/plugins/{id}/runs", post(run_plugin))
         .route("/services", get(list_services))
@@ -504,5 +556,25 @@ mod tests {
         let status = s.status(vec![]);
         assert_eq!(status.clients.len(), 1);
         assert_eq!(status.clients[0].origin, "https://gestalter.koljasam.com");
+    }
+
+    #[tokio::test]
+    async fn deletes_are_tombstones_and_blobs_are_collected_later() {
+        let dir = temp_dir("gc");
+        let app = app(state(Some(Folder::open(&dir).unwrap())));
+        std::fs::write(dir.join("notes/a.yml"), "id: a\nblobs: [used.png]\n").unwrap();
+        std::fs::write(dir.join("blobs/used.png"), [1]).unwrap();
+        std::fs::write(dir.join("blobs/unused.png"), [2]).unwrap();
+        let del = axum::http::Request::delete("/notes/a").body(Body::empty()).unwrap();
+        assert_eq!(send(&app, del).await.0, StatusCode::NO_CONTENT);
+        assert!(gestalts_core::is_tombstone_text(&std::fs::read_to_string(dir.join("notes/a.yml")).unwrap()));
+        let collect = || axum::http::Request::post("/blobs/collect").body(Body::empty()).unwrap();
+        let (status, body) = send(&app, collect()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("\"deleted\":[]"), "too soon: {body}");
+        assert!(std::fs::read_to_string(dir.join(".gestalts/blob-gc.json")).unwrap().contains("unused.png"));
+        let del = axum::http::Request::delete("/blobs/unused.png").body(Body::empty()).unwrap();
+        assert_eq!(send(&app, del).await.0, StatusCode::NO_CONTENT);
+        assert!(!dir.join("blobs/unused.png").exists());
     }
 }

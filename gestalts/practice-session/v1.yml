@@ -16,3 +16,9 @@ fields:
       type: map
       fields:
         at: { type: datetime, required: true }
+merge:
+  keys:
+    events: { union_by: at }
+    active_ms: max
+    trials: max
+    ended: max

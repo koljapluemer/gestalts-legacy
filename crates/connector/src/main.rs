@@ -76,8 +76,8 @@ fn main() {
         None => run_default(&cli.opts),
         Some(Command::Serve { data }) => serve(&cli.opts, data),
         Some(Command::Status { choose }) => status_window(&cli.opts, choose),
-        Some(Command::Lint { dir }) => std::process::exit(i32::from(lint(&FsStorage::new(&dir)) > 0)),
-        Some(Command::Publish { dir }) => std::process::exit(i32::from(publish(&dir) > 0)),
+        Some(Command::Lint { dir }) => all_gestalts(&cli.opts).map(|g| std::process::exit(i32::from(lint(&FsStorage::new(&dir), &g) > 0))),
+        Some(Command::Publish { dir }) => all_gestalts(&cli.opts).map(|g| std::process::exit(i32::from(publish(&dir, &g) > 0))),
     };
     if let Err(e) = result {
         eprintln!("gestalts-connector: {e}");
@@ -126,12 +126,7 @@ pub fn start_server(opts: &Opts, paths: Paths, folder: Option<Folder>, remember:
     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let control_token = uuid::Uuid::new_v4().to_string();
     paths::write_secret(&paths.control_token_file(), &control_token).map_err(|e| format!("cannot write the control token: {e}"))?;
-    let plugin_dirs = if opts.plugins_dir.is_empty() {
-        let builtin = plugins::unpack_builtin(&paths).map_err(|e| format!("cannot unpack the built-in plugins: {e}"))?;
-        vec![builtin, paths.user_plugins()]
-    } else {
-        opts.plugins_dir.clone()
-    };
+    let plugin_dirs = plugin_dirs(opts, &paths)?;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], opts.port));
     let listener = rt.block_on(tokio::net::TcpListener::bind(addr)).map_err(|e| format!("cannot listen on {addr}: {e}"))?;
     let address = format!("http://{addr}");
@@ -147,6 +142,21 @@ pub fn start_server(opts: &Opts, paths: Paths, folder: Option<Folder>, remember:
         if let Err(e) = served { eprintln!("gestalts-connector: server stopped: {e}"); }
     });
     Ok(Server { rt, plugins, shutdown, task, paths, control_token })
+}
+
+/// Where plugins come from: `--plugins-dir`, else the built-in ones (unpacked) and the user's.
+fn plugin_dirs(opts: &Opts, paths: &Paths) -> Result<Vec<PathBuf>, String> {
+    if !opts.plugins_dir.is_empty() {
+        return Ok(opts.plugins_dir.clone());
+    }
+    let builtin = plugins::unpack_builtin(paths).map_err(|e| format!("cannot unpack the built-in plugins: {e}"))?;
+    Ok(vec![builtin, paths.user_plugins()])
+}
+
+/// The core's gestalts and those of every plugin `opts` finds, for `lint` and `publish`.
+fn all_gestalts(opts: &Opts) -> Result<gestalts_core::Gestalts, String> {
+    let paths = Paths::new(opts.profile.as_deref())?;
+    plugins::load_gestalts(&plugin_dirs(opts, &paths)?)
 }
 
 /// Resolves on Ctrl+C, or on SIGTERM (`kill`, logout, service managers) on Unix.
@@ -186,11 +196,13 @@ fn serve(opts: &Opts, data: Option<PathBuf>) -> Result<(), String> {
 }
 
 /// Prints `key: gestalts` per note and any lints; returns the number of lints.
-fn lint(store: &FsStorage) -> usize {
-    let gestalts = gestalts_core::Gestalts::builtin();
+fn lint(store: &FsStorage, gestalts: &gestalts_core::Gestalts) -> usize {
     let mut count = 0;
     for key in store.list_notes_sync().expect("can list notes") {
         let raw = store.read_note_sync(&key).ok().flatten().unwrap_or_default();
+        if gestalts_core::is_tombstone_text(&raw) {
+            continue;
+        }
         let note = gestalts_core::Note::parse(key.clone(), raw);
         println!("{key}: {}", gestalts.of(&note).join(", "));
         if let Some(e) = &note.parse_error {
@@ -206,10 +218,10 @@ fn lint(store: &FsStorage) -> usize {
     count
 }
 
-fn publish(dir: &std::path::Path) -> usize {
+fn publish(dir: &std::path::Path, gestalts: &gestalts_core::Gestalts) -> usize {
     let r = gestalts_fs::publish(dir).expect("can publish the folder");
     r.renamed.iter().for_each(|(a, b)| println!("renamed {a} -> {b}"));
     r.removed.iter().for_each(|b| println!("removed unreferenced {b}"));
     r.problems.iter().for_each(|p| println!("! {p}"));
-    r.problems.len() + lint(&FsStorage::new(dir))
+    r.problems.len() + lint(&FsStorage::new(dir), gestalts)
 }

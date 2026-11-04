@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gestalts_core::{Gestalts, Note};
-use gestalts_plugin_host::{PluginBundle, Runtime, Trigger};
+use gestalts_plugin_host::{PluginBundle, Runtime, Trigger, WorkerManifest};
 use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, RwLock};
@@ -31,6 +31,7 @@ pub enum PluginState { Stopped, Starting, Ready, Running, Error }
 
 pub struct HostedPlugin {
     pub bundle: PluginBundle,
+    pub worker: WorkerManifest,
     pub view: PluginView,
     pub token: String,
     pub worker_url: Option<String>,
@@ -44,6 +45,8 @@ pub struct PluginHost {
     paths: Paths,
     uv: Arc<std::sync::RwLock<UvState>>,
     client: reqwest::Client,
+    /// the core's gestalts and every plugin's
+    gestalts: Arc<Gestalts>,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,24 +64,32 @@ impl PluginHost {
     pub fn discover(dirs: &[PathBuf], connector_url: String, paths: Paths) -> Result<Self, String> {
         let mut found = BTreeMap::new();
         let mut services = BTreeSet::new();
+        let mut bundles: Vec<PluginBundle> = Vec::new();
         for dir in dirs {
             if !dir.exists() { continue; }
             let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read plugin directory {}: {e}", dir.display()))?;
             for entry in entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())) {
                 if !entry.path().join("plugin.yml").is_file() { continue; }
-                let bundle = PluginBundle::load(entry.path()).map_err(|e| e.to_string())?;
-                if found.contains_key(&bundle.manifest.id) { return Err(format!("duplicate plugin {}", bundle.manifest.id)); }
-                for service in &bundle.manifest.worker.services {
+                let bundle = PluginBundle::load(entry.path()).map_err(|e| format!("{}: {e}", entry.path().display()))?;
+                if bundles.iter().any(|b| b.manifest.id == bundle.manifest.id) { return Err(format!("duplicate plugin {}", bundle.manifest.id)); }
+                bundles.push(bundle.clone());
+                // only plugins with a worker run here; the others are UI and data, for the apps
+                let Some(worker) = bundle.manifest.worker.clone() else { continue };
+                for service in &worker.services {
                     if !services.insert(service.clone()) { return Err(format!("duplicate service {service}")); }
                 }
                 let id = bundle.manifest.id.clone();
                 let view = PluginView { id: id.clone(), version: bundle.manifest.version.clone(), state: PluginState::Stopped,
-                    services: bundle.manifest.worker.services.clone(), error: None, current_run: None };
-                found.insert(id, Arc::new(Mutex::new(HostedPlugin { bundle, view, token: uuid::Uuid::new_v4().to_string(), worker_url: None, child: None })));
+                    services: worker.services.clone(), error: None, current_run: None };
+                found.insert(id, Arc::new(Mutex::new(HostedPlugin { bundle, worker, view, token: uuid::Uuid::new_v4().to_string(), worker_url: None, child: None })));
             }
         }
-        Ok(Self { inner: Arc::new(RwLock::new(found)), connector_url, paths, uv: Arc::new(std::sync::RwLock::new(UvState::Locating)), client: reqwest::Client::new() })
+        let gestalts = gestalts_plugin_host::gestalts_with(&bundles.iter().collect::<Vec<_>>())?;
+        Ok(Self { inner: Arc::new(RwLock::new(found)), connector_url, paths, uv: Arc::new(std::sync::RwLock::new(UvState::Locating)), client: reqwest::Client::new(), gestalts: Arc::new(gestalts) })
     }
+
+    /// The core's gestalts and those of every plugin found, for lints, triggers, access checks and merging.
+    pub fn gestalts(&self) -> &Gestalts { &self.gestalts }
 
     pub fn uv_state(&self) -> UvState { self.uv.read().expect("uv state lock").clone() }
 
@@ -122,8 +133,8 @@ impl PluginHost {
     async fn start(&self, plugin: Arc<Mutex<HostedPlugin>>, uv: &std::path::Path) -> Result<(), String> {
         let mut p = plugin.lock().await;
         p.view.state = PluginState::Starting;
-        if p.bundle.manifest.worker.runtime != Runtime::Uv { return Err("unsupported runtime".into()); }
-        let project = p.bundle.root.join(&p.bundle.manifest.worker.project);
+        if p.worker.runtime != Runtime::Uv { return Err("unsupported runtime".into()); }
+        let project = p.bundle.root.join(&p.worker.project);
         let environment = self.paths.cache.join("plugins").join(&p.bundle.manifest.id).join("venv");
         std::fs::create_dir_all(environment.parent().unwrap()).map_err(|e| e.to_string())?;
         let sync = self.uv_command(uv).args(["sync", "--locked", "--project"]).arg(&project)
@@ -134,7 +145,7 @@ impl PluginHost {
         drop(listener);
         // run the synced environment's executables directly (not via `uv run`), so the process we
         // stop is the worker itself rather than a uv parent whose child would outlive it
-        let command = &p.bundle.manifest.worker.command;
+        let command = &p.worker.command;
         let bin = environment.join(if cfg!(windows) { "Scripts" } else { "bin" });
         let program = [bin.join(&command[0]), bin.join(format!("{}.exe", command[0]))].into_iter().find(|p| p.is_file())
             .unwrap_or_else(|| PathBuf::from(&command[0]));
@@ -206,12 +217,12 @@ impl PluginHost {
 
     pub async fn note_changed(&self, key: &str, text: &str) {
         let note = Note::parse(key, text);
-        let gestalts = Gestalts::builtin().of(&note);
+        let gestalts = self.gestalts.of(&note);
         let plugins: Vec<_> = self.inner.read().await.values().cloned().collect();
         for plugin in plugins {
             let id = {
                 let p = plugin.lock().await;
-                let matched = p.bundle.manifest.worker.triggers.iter().any(|t| match t {
+                let matched = p.worker.triggers.iter().any(|t| match t {
                     Trigger::Change { query } => query.matches(&note, &gestalts),
                     Trigger::Schedule { .. } => false,
                 });
@@ -262,13 +273,25 @@ impl PluginHost {
 
     pub async fn policy_for_token(&self, token: &str) -> Option<gestalts_plugin_host::Access> {
         let plugins: Vec<_> = self.inner.read().await.values().cloned().collect();
-        for p in plugins { let p = p.lock().await; if p.token == token { return Some(p.bundle.manifest.worker.access.clone()); } }
+        for p in plugins { let p = p.lock().await; if p.token == token { return Some(p.worker.access.clone()); } }
         None
     }
 }
 
+/// The core's gestalts plus those of the plugins in `dirs` (without hosting them).
+pub fn load_gestalts(dirs: &[PathBuf]) -> Result<Gestalts, String> {
+    let mut bundles = Vec::new();
+    for dir in dirs.iter().filter(|d| d.exists()) {
+        let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read plugin directory {}: {e}", dir.display()))?;
+        for entry in entries.flatten().filter(|e| e.path().join("plugin.yml").is_file()) {
+            bundles.push(PluginBundle::load(entry.path()).map_err(|e| format!("{}: {e}", entry.path().display()))?);
+        }
+    }
+    gestalts_plugin_host::gestalts_with(&bundles.iter().collect::<Vec<_>>())
+}
+
 /// The plugins shipped in the repo's `plugins/`, compiled into the binary so an installed connector needs no checkout.
-static BUILTIN: include_dir::Dir<'static> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../plugins");
+static BUILTIN: include_dir::Dir<'static> = include_dir::include_dir!("$OUT_DIR/plugins");
 /// The Python SDK they depend on by relative path (`../../../sdk/python`), so it is unpacked in the same layout.
 // TODO: publish the SDK to PyPI and depend on a version instead, which third-party plugins need anyway
 static SDK: include_dir::Dir<'static> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../sdk/python");

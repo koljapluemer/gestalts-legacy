@@ -10,7 +10,7 @@ importers:
     devDependencies:
       '@tailwindcss/vite':
         specifier: 4.3.3
-        version: 4.3.3(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+        version: 4.3.3(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
@@ -22,7 +22,7 @@ importers:
         version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: 6.1.2
-        version: 6.1.2(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+        version: 6.1.2(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))
       daisyui:
         specifier: 5.7.50
         version: 5.7.50
@@ -49,16 +49,22 @@ importers:
         version: 7.0.2
       vite:
         specifier: 8.3.5
-        version: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
+        version: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+        version: 5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))
+      yaml:
+        specifier: 2.8.1
+        version: 2.8.1
 
   apps/demo:
     dependencies:
       '@gestalts/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@gestalts/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -77,6 +83,9 @@ importers:
       '@gestalts/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@gestalts/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -92,15 +101,15 @@ importers:
 
   packages/client:
     dependencies:
-      ts-fsrs:
-        specifier: 6.0.0
-        version: 6.0.0
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../sdk
     devDependencies:
       react:
         specifier: 19.3.1
         version: 19.3.1
 
-  packages/ui:
+  packages/kit:
     dependencies:
       '@codemirror/autocomplete':
         specifier: 6.20.3
@@ -126,15 +135,9 @@ importers:
       '@codemirror/view':
         specifier: 6.43.15
         version: 6.43.15
-      '@gestalts/client':
+      '@gestalts/sdk':
         specifier: workspace:*
-        version: link:../client
-      '@xyflow/react':
-        specifier: 12.12.0
-        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      codemirror-lang-typst:
-        specifier: 0.6.0
-        version: 0.6.0
+        version: link:../sdk
       dompurify:
         specifier: 3.4.17
         version: 3.4.17
@@ -154,6 +157,177 @@ importers:
       react-dom:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
+
+  packages/learning:
+    dependencies:
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      ts-fsrs:
+        specifier: 6.0.0
+        version: 6.0.0
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  packages/sdk:
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  packages/ui:
+    dependencies:
+      '@gestalts/client':
+        specifier: workspace:*
+        version: link:../client
+      '@gestalts/kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
+
+  plugins/canvas/ui:
+    dependencies:
+      '@gestalts/kit':
+        specifier: workspace:*
+        version: link:../../../packages/kit
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      '@xyflow/react':
+        specifier: 12.12.0
+        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  plugins/explorer/ui:
+    dependencies:
+      '@gestalts/kit':
+        specifier: workspace:*
+        version: link:../../../packages/kit
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  plugins/greek-alphabet/ui:
+    dependencies:
+      '@gestalts/learning':
+        specifier: workspace:*
+        version: link:../../../packages/learning
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  plugins/learn/ui:
+    dependencies:
+      '@gestalts/kit':
+        specifier: workspace:*
+        version: link:../../../packages/kit
+      '@gestalts/learning':
+        specifier: workspace:*
+        version: link:../../../packages/learning
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  plugins/quotes/ui:
+    dependencies:
+      '@gestalts/learning':
+        specifier: workspace:*
+        version: link:../../../packages/learning
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  plugins/sources/ui:
+    dependencies:
+      '@gestalts/kit':
+        specifier: workspace:*
+        version: link:../../../packages/kit
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+
+  plugins/typst/ui:
+    dependencies:
+      '@codemirror/autocomplete':
+        specifier: 6.20.3
+        version: 6.20.3
+      '@codemirror/language':
+        specifier: 6.13.1
+        version: 6.13.1
+      '@codemirror/view':
+        specifier: 6.43.15
+        version: 6.43.15
+      '@gestalts/kit':
+        specifier: workspace:*
+        version: link:../../../packages/kit
+      '@gestalts/sdk':
+        specifier: workspace:*
+        version: link:../../../packages/sdk
+      codemirror-lang-typst:
+        specifier: 0.6.0
+        version: 0.6.0
+      lucide-react:
+        specifier: 1.66.0
+        version: 1.66.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
 
 packages:
 
@@ -1974,6 +2148,11 @@ packages:
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
+  yaml@2.8.1:
+    resolution: {integrity: sha512-lcYcMxX2PO9XMGvAJkJ3OsNMw+/7FKes7/hgerGUYWIoWu5j/+YQqcZr5JnPZWzOsEBgMbSbiSTn/dv/69Mkpw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -2516,12 +2695,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.3.3
       '@tailwindcss/oxide-win32-x64-msvc': 4.3.3
 
-  '@tailwindcss/vite@4.3.3(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))':
+  '@tailwindcss/vite@4.3.3(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))':
     dependencies:
       '@tailwindcss/node': 4.3.3
       '@tailwindcss/oxide': 4.3.3
       tailwindcss: 4.3.3
-      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1)
 
   '@types/chai@5.2.3':
     dependencies:
@@ -2695,19 +2874,19 @@ snapshots:
   '@unrs/resolver-binding-win32-x64-msvc@1.13.0':
     optional: true
 
-  '@vitejs/plugin-react@6.1.2(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))':
+  '@vitejs/plugin-react@6.1.2(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1)
 
-  '@vitest/mocker@5.0.5(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))':
+  '@vitest/mocker@5.0.5(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.5
       estree-walker: 3.0.3
       magic-string: 1.4.5
     optionalDependencies:
-      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1)
 
   '@vitest/spy@5.0.5': {}
 
@@ -3507,7 +3686,7 @@ snapshots:
     dependencies:
       react: 19.3.1
 
-  vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0):
+  vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -3518,11 +3697,12 @@ snapshots:
       '@types/node': 26.6.6
       fsevents: 2.3.3
       jiti: 2.7.0
+      yaml: 2.8.1
 
-  vitest@5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)):
+  vitest@5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.5(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0))
+      '@vitest/mocker': 5.0.5(vite@8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -3533,7 +3713,7 @@ snapshots:
       tinybench: 6.2.3
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)
+      vite: 8.3.5(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.8.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@types/node': 26.6.6
@@ -3553,6 +3733,8 @@ snapshots:
   wordwrap@1.0.0: {}
 
   yallist@3.1.1: {}
+
+  yaml@2.8.1: {}
 
   yocto-queue@0.1.0: {}
 

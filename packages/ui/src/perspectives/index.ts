@@ -1,15 +1,1 @@
-export { definePerspective, type Perspective, type PerspectiveProps, type DataSpec } from './define/definePerspective';
-export { SearchSidebar } from './search-sidebar/SearchSidebar';
-export { UniversalEditor } from './universal-editor/UniversalEditor';
-export { GreekAlphabet } from './greek-alphabet/GreekAlphabet';
 export { ConnectorSettings, useConnectorState } from './connector-settings/ConnectorSettings';
-export { Canvas } from './canvas/Canvas';
-export { CanvasList } from './canvas/CanvasList';
-export { OLD_CANVASES, canvasLinksOf } from './canvas/canvasNote';
-export { TypstEditor } from './typst-editor/TypstEditor';
-export { TypstHosts } from './typst-editor/TypstHosts';
-export { createTypstDocument, documentsOf } from './typst-editor/typstDocument';
-export { Sources } from './sources/Sources';
-export type { NoteAction } from './search-sidebar/SearchSidebar';
-export { NewNote } from './new-note/NewNote';
-export { Learn } from './learn/Learn';

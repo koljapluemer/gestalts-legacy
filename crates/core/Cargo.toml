@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 async-trait.workspace = true
 biblatex = "0.12"
+gestalts-merge.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true

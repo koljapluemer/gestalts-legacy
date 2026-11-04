@@ -6,7 +6,7 @@ mod opfs;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gestalts_core::storage::{Layered, Storage, StorageError};
+use gestalts_core::storage::{Deck, Layered, Storage, StorageError};
 use gestalts_core::{Gestalts, IndexedNote, Note, Query, Repo, UpstreamReport, pull_upstream};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -32,40 +32,71 @@ pub struct WasmRepo {
     writable: Dyn,
     /// OPFS folder name, used to keep sync base snapshots next to the data
     dir: String,
-    /// the read-only upstream of a layered repo; its copies are tagged with `dir` as source
-    upstream: Option<Dyn>,
+    /// the storage with its decks, when it has any
+    layered: Option<Rc<Layered<Dyn, Dyn>>>,
     upstream_report: RefCell<UpstreamReport>,
 }
 
 #[wasm_bindgen]
 impl WasmRepo {
-    /// Notes in OPFS under `dir`.
-    pub async fn opfs(dir: String) -> Result<WasmRepo, JsError> {
+    /// Notes in OPFS under `dir`, over read-only decks (`[{source, aliases, url}]`, published folders, see
+    /// `Static`), with the core's gestalts plus `gestalts` (YAML definitions from plugins). Copy-on-write: deck notes
+    /// the user's notes reference are copied into OPFS, and untouched copies follow deck changes
+    /// (`gestalts_core::upstream`).
+    pub async fn open(dir: String, decks: JsValue, gestalts: Vec<String>) -> Result<WasmRepo, JsError> {
+        #[derive(serde::Deserialize)]
+        struct DeckSpec {
+            source: String,
+            #[serde(default)]
+            aliases: Vec<String>,
+            url: String,
+        }
+        let specs: Vec<DeckSpec> = if decks.is_undefined() || decks.is_null() { vec![] } else { from_js(decks)? };
+        let g = Gestalts::builtin_with(&gestalts.iter().map(String::as_str).collect::<Vec<_>>()).map_err(|e| JsError::new(&e))?;
         let writable: Dyn = Rc::new(Opfs::open(&dir).await.map_err(err)?);
-        Self::build(writable.clone(), writable, dir, None).await
+        let mut mounted = Vec::new();
+        for d in specs {
+            let storage: Dyn = Rc::new(Static::open(&d.url).await.map_err(err)?);
+            mounted.push(Deck { source: d.source, aliases: d.aliases, storage });
+        }
+        if mounted.is_empty() {
+            return Self::build(writable.clone(), writable, dir, None, g).await;
+        }
+        let layered = Rc::new(Layered { decks: mounted, top: writable.clone() });
+        Self::build(layered.clone(), writable, dir, Some(layered), g).await
     }
 
-    /// Read-only notes published at `static_base` (see `Static`), overlaid with writable notes in OPFS under `dir`.
-    /// Copy-on-write: upstream notes the user's notes reference are copied into OPFS, and untouched
-    /// copies follow upstream changes (see `gestalts_core::upstream`).
-    pub async fn layered(static_base: String, dir: String) -> Result<WasmRepo, JsError> {
-        let base: Dyn = Rc::new(Static::open(&static_base).await.map_err(err)?);
-        let writable: Dyn = Rc::new(Opfs::open(&dir).await.map_err(err)?);
-        let storage: Dyn = Rc::new(Layered { base: base.clone(), top: writable.clone(), source: dir.clone() });
-        Self::build(storage, writable, dir, Some(base)).await
-    }
-
-    async fn build(storage: Dyn, writable: Dyn, dir: String, upstream: Option<Dyn>) -> Result<WasmRepo, JsError> {
-        let repo = Rc::new(Repo::new(storage, Gestalts::builtin()));
-        let this = WasmRepo { repo, writable, dir, upstream, upstream_report: RefCell::default() };
+    async fn build(storage: Dyn, writable: Dyn, dir: String, layered: Option<Rc<Layered<Dyn, Dyn>>>, gestalts: Gestalts) -> Result<WasmRepo, JsError> {
+        let repo = Rc::new(Repo::new(storage, gestalts));
+        let this = WasmRepo { repo, writable, dir, layered, upstream_report: RefCell::default() };
         this.pull_upstream().await?;
         this.repo.load().await.map_err(err)?;
         Ok(this)
     }
 
+    /// The keys of the notes copied from the deck `source` (or its `aliases`).
+    #[wasm_bindgen(js_name = copiesOf)]
+    pub async fn copies_of(&self, source: String, aliases: Vec<String>) -> Result<Vec<String>, JsError> {
+        gestalts_core::copies_of(&*self.writable, &source, &aliases).await.map_err(err)
+    }
+
+    /// Collects this browser's unreferenced blobs, after a successful sync (`gestalts_core::blobs`). The manifest
+    /// lives in OPFS next to the data.
+    async fn collect_blobs(&self) -> Result<Vec<String>, JsError> {
+        let store = Opfs::open(&format!("{}-blob-gc", self.dir)).await.map_err(err)?;
+        let mut manifest: gestalts_core::GcManifest =
+            store.read_note("manifest").await.map_err(err)?.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let texts = self.repo.texts();
+        let referenced = gestalts_core::referenced_blobs(texts.iter().map(|(k, t)| (k.as_str(), t.as_str())), self.repo.gestalts());
+        let deleted = gestalts_core::collect_blobs(&*self.writable, &referenced, &mut manifest, js_sys::Date::now() as i64).await.map_err(err)?;
+        let json = serde_json::to_string(&manifest).map_err(|e| JsError::new(&e.to_string()))?;
+        store.write_note("manifest", &json).await.map_err(err)?;
+        Ok(deleted)
+    }
+
     async fn pull_upstream(&self) -> Result<(), JsError> {
-        if let Some(base) = &self.upstream {
-            *self.upstream_report.borrow_mut() = pull_upstream(&**base, &*self.writable, &self.dir).await.map_err(err)?;
+        if let Some(l) = &self.layered {
+            *self.upstream_report.borrow_mut() = pull_upstream(&l.deck_refs(), &*self.writable).await.map_err(err)?;
         }
         Ok(())
     }
@@ -115,9 +146,29 @@ impl WasmRepo {
         to_js(&repo.put_value(key.as_deref(), value).await.map_err(err)?)
     }
 
-    pub async fn delete(&self, key: String) -> Result<(), JsError> {
+    /// Deletes a note by writing its tombstone, and the notes that die with it. Returns every key deleted.
+    pub async fn delete(&self, key: String) -> Result<Vec<String>, JsError> {
         let repo = self.repo.clone();
-        repo.delete(&key).await.map_err(err)
+        repo.delete(&key, &now()).await.map_err(err)
+    }
+
+    /// Whether `key` is a tombstone.
+    #[wasm_bindgen(js_name = isDeleted)]
+    pub fn is_deleted(&self, key: &str) -> bool {
+        self.repo.is_deleted(key)
+    }
+
+    /// Three-way merge of one note's text as a sync does it, by this repo's gestalts: `{text, conflicts, raw}`, `text`
+    /// null when the note is absent, `conflicts` the values no rule settled (`{path, base?, kept?, lost?}`; the text
+    /// holds `kept`).
+    pub fn merge3(&self, key: &str, base: Option<String>, local: Option<String>, remote: Option<String>) -> Result<JsValue, JsError> {
+        let m = gestalts_core::merge_note(key, base.as_deref(), local.as_deref(), remote.as_deref(), self.repo.gestalts(), &now());
+        let conflicts: Vec<gestalts_core::Value> = m
+            .conflicts
+            .iter()
+            .map(|c| gestalts_core::note::parse_yaml(&gestalts_core::conflict_note(key, key, c, m.raw, &now()).1).unwrap_or_default())
+            .collect();
+        to_js(&serde_json::json!({ "text": m.text, "conflicts": conflicts, "raw": m.raw }))
     }
 
     #[wasm_bindgen(js_name = readBlob)]
@@ -141,12 +192,20 @@ impl WasmRepo {
     pub fn inspect(&self, key: &str, raw: &str) -> Result<JsValue, JsError> {
         let note = Note::parse(key, raw);
         let g = self.repo.gestalts();
-        to_js(&IndexedNote { id: note.id().to_owned(), gestalts: g.of(&note), lints: g.lint(&note), note })
+        to_js(&IndexedNote::new(note, g))
     }
 
-    /// Syncs this repo's writable notes and blobs with a connector, then reloads. `tag` names conflict notes.
+    /// What writing `json` (a note as JSON) under `key` would index as, without saving it.
+    #[wasm_bindgen(js_name = inspectValue)]
+    pub fn inspect_value(&self, key: Option<String>, json: String) -> Result<JsValue, JsError> {
+        let value: gestalts_core::Value = serde_json::from_str(&json).map_err(|e| JsError::new(&e.to_string()))?;
+        let key = key.unwrap_or_else(|| value.get("id").and_then(|v| v.as_str()).unwrap_or("new").to_owned());
+        self.inspect(&key, &gestalts_core::note::to_yaml(&value))
+    }
+
+    /// Syncs this repo's writable notes and blobs with a connector, then reloads.
     /// Returns the sync report plus `folder`, the path of the connector's open folder.
-    pub async fn sync(&self, connector_url: String, tag: String) -> Result<JsValue, JsError> {
+    pub async fn sync(&self, connector_url: String) -> Result<JsValue, JsError> {
         // ms per step, for the debug log
         let mut timings = serde_json::Map::new();
         let mut last = js_sys::Date::now();
@@ -167,7 +226,7 @@ impl WasmRepo {
         let slug: String = format!("{connector_url}#{folder_id}").chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let base = Opfs::open(&format!("{}-sync-base/{slug}", self.dir)).await.map_err(err)?;
         mark("open_base");
-        let report = gestalts_core::sync_with(&*self.writable, &remote, &base, &tag, &mut mark).await.map_err(err)?;
+        let report = gestalts_core::sync_with(&*self.writable, &remote, &base, self.repo.gestalts(), &now(), &mut mark).await.map_err(err)?;
         self.pull_upstream().await?;
         mark("pull_upstream");
         // only what sync and pull_upstream wrote: the repo's own writes are indexed already
@@ -179,11 +238,20 @@ impl WasmRepo {
         let repo = self.repo.clone();
         repo.reindex(&changed).await.map_err(err)?;
         mark("reindex");
+        let collected = self.collect_blobs().await?;
+        let collected_remote = remote.collect_blobs().await.unwrap_or_default();
+        mark("collect_blobs");
         let mut out = serde_json::to_value(&report).map_err(|e| JsError::new(&e.to_string()))?;
         out["folder"] = folder_path.into();
+        out["blobs_collected"] = serde_json::json!({ "local": collected, "remote": collected_remote });
         out["timings"] = timings.into();
         to_js(&out)
     }
+}
+
+/// The current time as an ISO datetime, for tombstones and conflict records.
+fn now() -> String {
+    String::from(js_sys::Date::new_0().to_iso_string())
 }
 
 #[wasm_bindgen(js_name = newId)]
@@ -211,14 +279,6 @@ pub fn card_id(front: &str) -> String {
 #[wasm_bindgen(js_name = contentHash)]
 pub fn content_hash(text: &str) -> String {
     gestalts_core::content_hash(text.as_bytes())
-}
-
-/// Three-way merge of one note's text, as sync does: `{text, conflict}`, `text` null for a deletion and
-/// `conflict` the remote text when part of it lost.
-#[wasm_bindgen(js_name = merge3)]
-pub fn merge3(base: Option<String>, local: Option<String>, remote: Option<String>) -> Result<JsValue, JsError> {
-    let m = gestalts_core::merge3(base.as_deref(), local.as_deref(), remote.as_deref());
-    to_js(&serde_json::json!({ "text": m.text, "conflict": m.conflict }))
 }
 
 /// BibTeX text as sources: `[{source, warnings}]`.

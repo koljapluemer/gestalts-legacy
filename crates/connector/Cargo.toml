@@ -10,6 +10,7 @@ default = ["desktop"]
 desktop = ["dep:tray-icon", "dep:tao", "dep:eframe", "dep:rfd", "dep:auto-launch", "dep:opener"]
 
 [dependencies]
+pollster = "0.4"
 gestalts-core.workspace = true
 gestalts-fs.workspace = true
 gestalts-plugin-host = { path = "../plugin-host" }

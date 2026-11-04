@@ -23,6 +23,7 @@ A note is any YAML. Conventions, all optional:
 | `upstream` | where a copied note came from, see [Published decks](#published-decks) |
 | `canvas`, `template`, `cards` | the note's own canvas, template and flashcards ([gestalts.md](gestalts.md#folded-parts)) |
 | `folded` | on a retired note whose content moved into another note: `{into, hash}` ([gestalts.md](gestalts.md#folded-parts)) |
+| `deleted` | a **tombstone**: a note that is only `{id, deleted: <datetime>}` was deleted. It's kept forever, so the delete syncs; queries and the search skip it, and writing the note again brings it back |
 
 How the core copes with missing or broken pieces:
 - A note without an `id` is addressed by its key, the file name without `.yml`.
@@ -32,21 +33,22 @@ How the core copes with missing or broken pieces:
 
 ## Published decks
 
-A deck shipped read-only (like the Demo's `public/gestalt-data`) follows a few more rules, so that copies in user space can follow it:
+A deck shipped read-only (a plugin's `deck/`, like greek-alphabet's) follows a few more rules, so that copies in user space can follow it:
 - **Blobs are content-addressed**: `<first 16 hex digits of sha256>.<ext>`. A replaced image gets a new name, which changes the note that uses it.
-- **Notes are never deleted, they're retired**: tag them `retired`. Perspectives skip retired notes, and copies pick the tag up like any other change.
+- **Notes are never deleted, they're retired**: tag them `retired` (publishing rejects tombstones). Perspectives skip retired notes, and copies pick the tag up like any other change.
 - **Note ids are the file names**, since relationships are resolved to keys in the deck.
 - Deck notes have no `upstream` field. User-space copies get one, appended as the last lines:
 
   ```yaml
   upstream:
-    source: demo        # the user-space folder's name
+    source: greek-alphabet   # the deck's id: its plugin's (copies made as `demo` follow it too, an alias)
     hash: <sha256 of the deck note's text as copied>
   ```
 
   A copy is untouched while the text before the trailer still has that hash.
 
-To publish after editing notes or overwriting blob files, run `mise run publish-data <folder>` and commit the result. It:
+To publish after editing notes or overwriting blob files, run `mise run publish-data <folder>` (e.g.
+`plugins/greek-alphabet/deck`) and commit the result. It:
 1. renames blobs to their content hash and rewrites the notes that use them
 2. deletes blobs no note uses
 3. writes `index.json`
